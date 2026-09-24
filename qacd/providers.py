@@ -27,11 +27,18 @@ Three implementations ship with the package:
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Protocol, Sequence, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
+from qacd.decompose import (
+    build_decomposition_prompt,
+    parse_json_claims,
+    verification_prompt_for,
+)
+from qacd.mechanical import normalize_text
 from qacd.types import OCRRecord
 
 __all__ = [
@@ -263,34 +270,49 @@ class RapidOCRProvider:
 class LLaVAProvider:
     """Frozen LLaVA-1.5-13B evidence provider.
 
-    This adapter is intentionally thin. It performs three kinds of call against a
-    frozen checkpoint:
+    Performs four kinds of call against a frozen checkpoint:
 
-    * decomposition (``decompose``) — the constrained JSON prompt from
+    * decomposition — the constrained JSON prompt from
       :func:`qacd.decompose.build_decomposition_prompt`;
-    * belief/direct verification — short yes/no probes with a constrained answer
-      grammar, parsed into support/confidence readings;
-    * resampling (``sample_answers``) — K stochastic generations of the *same*
-      prompt, used by the MVR channel.
+    * belief views — one generation per view (independent / visual /
+      minus-claim) plus one yes-no match probe;
+    * direct verification — a type-routed yes-no probe per claim, with OCR and
+      numeric sub-probes;
+    * resampling — K stochastic generations of the *same* prompt, consumed by
+      the MVR channel.
 
     Resource envelope measured in the research runs (2 x A100-SXM4-80GB host,
     one process per GPU): the 13B checkpoint in fp16 occupies roughly 26 GB of
-    device memory, leaving headroom for a batch of 4-8 probes on a 40 GB card.
-    ``calls_per_response`` is the cost dial: 7.65 model calls for the LM channel
-    alone, plus K for resampling (K = 3 is the reported knee, K = 5 the best
-    measured setting).
+    device memory, leaving headroom for a batch of 4-8 short probes on a 40 GB
+    card. Cost per response: 7.65 model calls for the LM channel, plus K for
+    resampling (K = 3 is the reported knee, K = 5 the best measured setting).
+
+    Testability
+    -----------
+    Only :meth:`_generate_with_scores` touches the model. Everything else —
+    prompt construction and answer parsing — is pure and unit-tested, so the
+    provider can be verified end to end by injecting a fake ``_generate``
+    (see ``tests/test_provider.py``). A ``model_fn`` may be passed directly to
+    the constructor for that purpose.
     """
 
     name = "llava-1.5-13b"
 
+    #: Answer grammar for the yes/no probes.
+    AFFIRMATIVE = ("yes", "true", "correct", "supported", "support")
+    NEGATIVE = ("no", "false", "incorrect", "unsupported", "contradict")
+
     def __init__(
         self,
-        model_path: str,
+        model_path: str = "",
         ocr_provider: Any = None,
         temperature: float = 0.7,
         top_p: float = 0.9,
-        max_new_tokens: int = 256,
+        max_new_tokens: int = 64,
         device: str = "cuda",
+        dtype: str = "float16",
+        seed: Optional[int] = None,
+        model_fn: Any = None,
     ):
         self.model_path = model_path
         self.ocr_provider = ocr_provider
@@ -298,33 +320,187 @@ class LLaVAProvider:
         self.top_p = float(top_p)
         self.max_new_tokens = int(max_new_tokens)
         self.device = device
+        self.dtype = dtype
+        self.seed = seed
         self._model = None
         self._processor = None
+        self._torch = None
+        #: Injectable ``(image, prompt, do_sample) -> (text, confidence)``.
+        self._model_fn = model_fn
+        self.calls = 0
 
-    # -- lazy loading ------------------------------------------------------
+    # -- model plumbing ----------------------------------------------------
     def load(self) -> None:
         """Load the checkpoint. Kept lazy so importing this module is free."""
         if self._model is not None:
             return
         try:
-            import torch  # noqa: F401
+            import torch
             from transformers import AutoProcessor, LlavaForConditionalGeneration
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError(
-                "LLaVAProvider needs the model extra: pip install torch transformers accelerate pillow"
+                "LLaVAProvider needs the model extra: "
+                "pip install torch transformers accelerate pillow"
             ) from exc
+        if not self.model_path:
+            raise ValueError("model_path is required to load the checkpoint")
+        self._torch = torch
         self._processor = AutoProcessor.from_pretrained(self.model_path)
         self._model = LlavaForConditionalGeneration.from_pretrained(
-            self.model_path, torch_dtype="float16", device_map=self.device
+            self.model_path, torch_dtype=self.dtype, device_map=self.device
         )
         self._model.eval()
 
-    def _generate(self, image: str, prompt: str, do_sample: bool) -> str:  # pragma: no cover
-        raise NotImplementedError(
-            "Wire this to your checkpoint's generate() call. The reference "
-            "implementation stops at the interface so that no unverified "
-            "modelling code is presented as tested."
+    def _generate_with_scores(self, image: str, prompt: str, do_sample: bool) -> tuple[str, float]:
+        """Run one generation. Returns ``(text, mean_token_probability)``.
+
+        This is the only method that touches the model. Override it, or pass
+        ``model_fn`` to the constructor, to test the provider without weights.
+        """
+        if self._model_fn is not None:
+            self.calls += 1
+            return self._model_fn(image, prompt, do_sample)
+
+        self.load()  # pragma: no cover - requires weights
+        torch = self._torch
+        from PIL import Image
+
+        conversation = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+        text = self._processor.apply_chat_template(conversation, add_generation_prompt=True)
+        pil = Image.open(image).convert("RGB") if isinstance(image, str) and image else None
+        inputs = self._processor(images=pil, text=text, return_tensors="pt").to(self.device)
+
+        kwargs = {
+            "max_new_tokens": self.max_new_tokens,
+            "do_sample": bool(do_sample),
+            "output_scores": True,
+            "return_dict_in_generate": True,
+        }
+        if do_sample:
+            kwargs["temperature"] = self.temperature
+            kwargs["top_p"] = self.top_p
+        if self.seed is not None:
+            torch.manual_seed(int(self.seed))
+
+        with torch.inference_mode():
+            output = self._model.generate(**inputs, **kwargs)
+
+        prompt_len = inputs["input_ids"].shape[-1]
+        gen_ids = output.sequences[0][prompt_len:]
+        decoded = self._processor.decode(gen_ids, skip_special_tokens=True).strip()
+
+        confidence = 1.0
+        if getattr(output, "scores", None):
+            probs = []
+            for step, step_scores in enumerate(output.scores):
+                if step >= len(gen_ids):
+                    break
+                step_probs = torch.softmax(step_scores[0].float(), dim=-1)
+                probs.append(float(step_probs[int(gen_ids[step])]))
+            if probs:
+                confidence = float(sum(probs) / len(probs))
+        self.calls += 1
+        return decoded, confidence
+
+    def _generate(self, image: str, prompt: str, do_sample: bool = False) -> str:
+        """Text-only convenience wrapper."""
+        return self._generate_with_scores(image, prompt, do_sample)[0]
+
+    # -- prompt construction (pure) ---------------------------------------
+    @staticmethod
+    def build_belief_prompt(view: str, question: str, answer: str, claim_text: str) -> str:
+        """Prompt for one belief view."""
+        if view == "independent":
+            return (
+                "Answer the question from scratch using the image.\n"
+                f"Question: {question}\n"
+                "Answer with a short phrase only."
+            )
+        if view == "visual":
+            return (
+                "Answer using only what is visible in the image, ignoring any prior assumption.\n"
+                f"Question: {question}\n"
+                "Answer with a short phrase only."
+            )
+        if view == "minus_claim":
+            return (
+                "Answer the question as if the following statement were not asserted.\n"
+                f"Question: {question}\n"
+                f"Statement to set aside: {claim_text}\n"
+                "Answer with a short phrase only."
+            )
+        if view == "answer_match":
+            return LLaVAProvider.build_match_prompt(claim_text, answer)
+        raise ValueError(f"unknown belief view: {view}")
+
+    @staticmethod
+    def build_match_prompt(claim_text: str, answer: str) -> str:
+        return (
+            "Decide whether the ANSWER supports the CLAIM.\n"
+            f"CLAIM: {claim_text}\n"
+            f"ANSWER: {answer}\n"
+            'Reply with exactly one word: "yes" or "no".'
         )
+
+    @staticmethod
+    def build_direct_prompt(claim_text: str, claim_type: str) -> str:
+        """Type-routed verification probe."""
+        probe = verification_prompt_for(claim_text, claim_type)
+        return f"{probe}\nReply with exactly one word: \"yes\" or \"no\"."
+
+    @staticmethod
+    def build_ocr_prompt() -> str:
+        return (
+            "Read all text visible in the image, verbatim.\n"
+            "If there is no text, reply with exactly: none"
+        )
+
+    @staticmethod
+    def build_number_prompt(claim_text: str) -> str:
+        return (
+            "Check the numeric claim against the image.\n"
+            f"CLAIM: {claim_text}\n"
+            'Reply with exactly one word: "yes" if the number is consistent with the image, otherwise "no".'
+        )
+
+    # -- parsing (pure) ----------------------------------------------------
+    @classmethod
+    def parse_support(cls, text: str) -> float:
+        """Map a yes/no completion to a support value in ``[0, 1]``.
+
+        Returns 0.5 when the completion is neither clearly affirmative nor
+        clearly negative — the same "uncertain" convention the rest of the
+        evidence layer uses.
+        """
+        lowered = str(text or "").strip().lower()
+        if not lowered:
+            return 0.5
+        head = lowered.split("\n")[0]
+        for token in re.findall(r"[a-z']+", head):
+            if token in cls.AFFIRMATIVE:
+                return 1.0
+            if token in cls.NEGATIVE:
+                return 0.0
+        return 0.5
+
+    @staticmethod
+    def _similarity(left: str, right: str) -> float:
+        """Normalised similarity used to turn a generated answer into support."""
+        a = normalize_text(left)
+        b = normalize_text(right)
+        if not a or not b:
+            return 0.0
+        if a in b or b in a:
+            return 1.0
+        return float(difflib.SequenceMatcher(None, a, b).ratio())
 
     # -- EvidenceProvider surface -----------------------------------------
     def ocr(self, image: str) -> OCRRecord:
@@ -332,14 +508,82 @@ class LLaVAProvider:
             return OCRRecord(image=str(image), texts=[], scores=[])
         return self.ocr_provider.ocr(image)
 
-    def belief_views(self, question: str, answer: str, claim_text: str) -> List[VerificationView]:  # pragma: no cover
-        raise NotImplementedError
+    def decompose(self, question: str, answer: str, max_claims: int) -> Any:
+        """Checked LLM decomposition; ``None`` makes the caller use the fallback."""
+        prompt = build_decomposition_prompt(question, answer, max_claims)
+        text, _ = self._generate_with_scores("", prompt, False)
+        claims = parse_json_claims(text)
+        return claims or None
 
-    def direct_verification(self, question: str, answer: str, claim_text: str, claim_type: str) -> DirectVerification:  # pragma: no cover
-        raise NotImplementedError
+    def belief_views(self, question: str, answer: str, claim_text: str) -> List[VerificationView]:
+        """Four claim-specific belief readings."""
+        views: List[VerificationView] = []
+        for view in ("independent", "visual", "minus_claim"):
+            prompt = self.build_belief_prompt(view, question, answer, claim_text)
+            generated, confidence = self._generate_with_scores("", prompt, False)
+            support = self._similarity(generated, claim_text)
+            views.append(
+                VerificationView(
+                    view=view,
+                    support=support,
+                    confidence=confidence,
+                    evidence=generated,
+                    uncertainty=1.0 - support,
+                )
+            )
 
-    def sample_answers(self, question: str, k: int) -> List[str]:  # pragma: no cover
-        raise NotImplementedError
+        match_prompt = self.build_belief_prompt("answer_match", question, answer, claim_text)
+        match_text, match_confidence = self._generate_with_scores("", match_prompt, False)
+        match_support = self.parse_support(match_text)
+        views.append(
+            VerificationView(
+                view="answer_match",
+                support=match_support,
+                confidence=match_confidence if match_support != 0.5 else 0.5,
+                evidence=match_text,
+                uncertainty=1.0 if match_support == 0.5 else 0.0,
+            )
+        )
+        return views
 
-    def decompose(self, question: str, answer: str, max_claims: int) -> Any:  # pragma: no cover
-        raise NotImplementedError
+    def direct_verification(
+        self, question: str, answer: str, claim_text: str, claim_type: str
+    ) -> DirectVerification:
+        """Type-routed direct probe plus OCR and numeric sub-probes."""
+        direct_text, direct_confidence = self._generate_with_scores(
+            "", self.build_direct_prompt(claim_text, claim_type), False
+        )
+        support = self.parse_support(direct_text)
+        contradiction = 1.0 - support if support != 0.5 else 0.5
+        uncertainty = 1.0 if support == 0.5 else 0.0
+
+        # OCR probe: only meaningful for text claims, but cheap enough to always
+        # run and route on afterwards.
+        ocr_text, _ = self._generate_with_scores("", self.build_ocr_prompt(), False)
+        ocr_support = self._similarity(ocr_text, claim_text)
+
+        number_text, _ = self._generate_with_scores("", self.build_number_prompt(claim_text), False)
+        number_support = self.parse_support(number_text)
+
+        return DirectVerification(
+            support=support,
+            contradiction=contradiction,
+            evidence_present=1.0 if direct_text.strip() else 0.0,
+            uncertainty=uncertainty,
+            evidence_phrase=direct_text.strip(),
+            ocr_read_support=ocr_support,
+            number_check_support=number_support,
+            visual_evidence_support=support,
+        )
+
+    def sample_answers(self, question: str, k: int) -> List[str]:
+        """K stochastic generations of the identical prompt (MVR input)."""
+        k = int(k)
+        if k < 1:
+            raise ValueError("k must be >= 1")
+        prompt = (
+            "Answer the question in a short phrase.\n"
+            f"Question: {question}\n"
+            "Answer:"
+        )
+        return [self._generate_with_scores("", prompt, True)[0].strip() for _ in range(k)]
