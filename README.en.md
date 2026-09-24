@@ -1,4 +1,4 @@
-# QACD — Question-Conditioned Atomic Claim Decomposition
+﻿# QACD — Question-Conditioned Atomic Claim Decomposition
 
 **Post-hoc answer-error risk scoring for LVLM visual question answering**
 
@@ -68,7 +68,7 @@ The decision layer depends on **NumPy only** — no GPU, no model weights:
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 62 tests, fully offline
+python -m pytest -q                  # 64 tests, fully offline
 python scripts/demo_offline.py       # end-to-end demo on a synthetic dev set
 qacd demo
 

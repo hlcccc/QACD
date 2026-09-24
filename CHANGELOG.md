@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -28,7 +28,7 @@ single integration-ready project.
     `RapidOCRProvider` and a `LLaVAProvider` adapter.
   - `service.py` — FastAPI service exposing the four integration endpoints.
   - `cli.py` — `score`, `demo`, `fit`, `serve`, `version`.
-- **Tests** — 62 tests covering decomposition, mechanical/MVR features,
+- **Tests** — 64 tests covering decomposition, mechanical/MVR features,
   calibration correctness and determinism, aggregation, conformal selection,
   pipeline fitting, scorer round-trip and the response payload contract.
 - **Documentation** (Chinese, with an English README) — method, interface
