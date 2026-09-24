@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hlcccc/QACD/configs/schema_request.json",
+  "title": "QACD risk request",
+  "description": "Request body for POST /v1/qacd/risk. Field names and semantics are frozen; new fields may only be added, never repurposed.",
+  "type": "object",
+  "required": ["question", "answer"],
+  "additionalProperties": false,
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "description": "VQA question text."
+    },
+    "answer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Frozen LVLM answer to be scored."
+    },
+    "image": {
+      "type": "string",
+      "default": "",
+      "description": "Image path, URL or opaque identifier."
+    },
+    "threshold": {
+      "type": ["number", "null"],
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "default": null,
+      "description": "Overrides the frozen warning threshold. Affects is_high_risk only, never risk_score."
+    },
+    "return_claims": {
+      "type": "boolean",
+      "default": true,
+      "description": "Include per-claim risk detail in the response."
+    }
+  }
+}

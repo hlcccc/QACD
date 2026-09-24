@@ -1,0 +1,12 @@
+# Normalise line endings in the repository. The working tree on Windows may use
+# CRLF, but everything stored in git is LF so that the Makefile and the shell
+# snippets behave identically everywhere.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.docx binary
+*.joblib binary
+*.npy binary

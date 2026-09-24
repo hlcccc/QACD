@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qacd"
+version = "1.0.0"
+description = "Question-Conditioned Atomic Claim Decomposition (QACD): post-hoc answer-error risk scoring for LVLM visual question answering."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary - see NOTICE.md" }
+authors = [{ name = "HLC", email = "hlcccc@users.noreply.github.com" }]
+keywords = [
+  "visual-question-answering",
+  "hallucination-detection",
+  "uncertainty-calibration",
+  "selective-prediction",
+  "vision-language-model",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+service = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.0"]
+ocr = ["rapidocr-onnxruntime"]
+llava = ["torch>=2.1", "transformers>=4.40", "accelerate", "pillow"]
+research = ["scikit-learn", "pandas", "scipy", "matplotlib"]
+test = ["pytest>=7.0"]
+
+[project.scripts]
+qacd = "qacd.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["qacd*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

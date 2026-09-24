@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local / private assets that must never be committed
+data/
+cache/
+checkpoints/
+weights/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.joblib
+*.pkl
+.env
+.env.*
+secrets/
+*.local.yaml
+*.local.yml
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Run artefacts
+runs/
+logs/
+*.log
+tmp/

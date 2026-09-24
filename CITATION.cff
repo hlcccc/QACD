@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "QACD: Question-Conditioned Atomic Claim Decomposition for LVLM answer-error risk scoring"
+abstract: >-
+  QACD is a post-hoc answer-error risk scorer for frozen vision-language models on
+  visual question answering. It decomposes an answer into question-conditioned
+  atomic claims, collects belief-consistency, direct-verification, alignment and
+  mechanical-OCR evidence, calibrates a regularised logistic risk map, and
+  aggregates claim risks into an answer-level score with a maximum operator.
+  On a frozen TextVQA test split of 1,999 responses over 1,278 unseen images the
+  full pipeline reaches 0.8526 response-level AUROC, statistically at parity with
+  the white-box UMPIRE K=5 baseline (delta AUROC -0.0039, 95% CI [-0.0195, +0.0124]).
+version: 1.0.0
+date-released: "2026-09-24"
+license: LicenseRef-Proprietary
+repository-code: "https://github.com/hlcccc/QACD"
+keywords:
+  - visual question answering
+  - hallucination detection
+  - uncertainty calibration
+  - selective prediction
+  - vision-language models
+authors:
+  - family-names: HLC
+    alias: hlcccc
+    affiliation: "South China University of Technology"
+    # TODO(author): replace with the full author list, affiliation and ORCID
+    # before the manuscript is submitted. Author identity fields are still
+    # unresolved in the research pipeline.
+preferred-citation:
+  type: unpublished
+  title: "QACD: Question-Conditioned Atomic Claim Decomposition for answer-error risk in vision-language question answering"
+  authors:
+    - family-names: HLC
+      alias: hlcccc
+  notes: >-
+    Manuscript in preparation. No public preprint link exists yet. The Chinese
+    manuscript draft records that author identity, checkpoint revision numbers,
+    full cost accounting, declarations and venue-specific policy fields remain
+    to be supplied before submission.
