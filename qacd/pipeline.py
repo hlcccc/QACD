@@ -100,8 +100,18 @@ class QACDPipeline:
     # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
-    def _claim_rows(self, question: str, answer: str) -> tuple[List[Claim], Sequence[str], List[Dict[str, float]], int]:
-        """Build claims and their feature rows. Returns calls made."""
+    def _claim_rows(
+        self,
+        question: str,
+        answer: str,
+        image: str = "",
+        ocr_texts: Optional[Sequence[str]] = None,
+    ) -> tuple[List[Claim], Sequence[str], List[Dict[str, float]], int]:
+        """Build claims and their feature rows. Returns calls made.
+
+        ``ocr_texts`` is passed in by the callers so the image is read exactly
+        once per request; passing ``None`` falls back to reading it here.
+        """
         calls = 0
         completion = None
         if hasattr(self.provider, "decompose"):
@@ -113,8 +123,9 @@ class QACDPipeline:
         )
         claims = decomposition.claims
 
-        ocr = self.provider.ocr("")
-        ocr_texts = list(ocr.texts)
+        if ocr_texts is None:
+            ocr_texts = list(self.provider.ocr(image).texts)
+        ocr_texts = list(ocr_texts)
 
         rows: List[Dict[str, float]] = []
         for claim in claims:
@@ -152,7 +163,12 @@ class QACDPipeline:
         started = time.perf_counter()
         warnings: List[str] = []
 
-        claims, reasons, rows, calls = self._claim_rows(question, answer)
+        # The image is read exactly once and reused by both the claim-level
+        # mechanical features and the response-level MVR channel.
+        ocr = self.provider.ocr(image)
+        ocr_texts = list(ocr.texts)
+
+        claims, reasons, rows, calls = self._claim_rows(question, answer, image, ocr_texts)
         if not claims:
             warnings.append("decomposition produced no claims")
         if reasons:
@@ -178,10 +194,9 @@ class QACDPipeline:
         channels: Dict[str, float] = {"evidence_score": evidence_score}
         final_score = evidence_score
         if self.config.k:
-            ocr = self.provider.ocr(image)
             sampled = self.provider.sample_answers(question, int(self.config.k))
             calls += len(sampled)
-            mvr = mvr_features(sampled, list(ocr.texts), k=int(self.config.k))
+            mvr = mvr_features(sampled, ocr_texts, k=int(self.config.k))
             channels.update({k: float(v) for k, v in mvr.items()})
             if self.fusion_fitted_:
                 vector = np.array([[evidence_score] + [float(mvr[f]) for f in MVR_FEATURES]], dtype=float)
@@ -239,7 +254,7 @@ class QACDPipeline:
             image = str(record.get("image", ""))
             label = int(record.get("failed", 0))
 
-            claims, _, rows, _ = self._claim_rows(question, answer)
+            claims, _, rows, _ = self._claim_rows(question, answer, image)
             if not rows:
                 continue
             matrix = build_matrix(rows, self.feature_names)
@@ -265,7 +280,6 @@ class QACDPipeline:
                 sampled = self.provider.sample_answers(question, int(self.config.k))
                 mvr = mvr_features(sampled, list(ocr.texts), k=int(self.config.k))
                 response_mvr.append([float(mvr[f]) for f in MVR_FEATURES])
-
         if not claim_rows:
             raise ValueError("no claim rows were produced from the supplied records")
 

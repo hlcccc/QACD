@@ -150,12 +150,21 @@ class MockProvider:
     def __init__(self, image_text: str = "", sampled_pool: Sequence[str] | None = None):
         self.image_text = str(image_text or "")
         self.sampled_pool = list(sampled_pool or [])
+        #: OCR result of the most recent :meth:`ocr` call. A real provider holds
+        #: the image in context; the mock mirrors that so verification does not
+        #: have to re-read (and cannot invent) an image path.
+        self._last_ocr: OCRRecord | None = None
 
     # -- OCR ---------------------------------------------------------------
     def ocr(self, image: str) -> OCRRecord:
         text = self.image_text or image
         parts = [p.strip() for p in re.split(r"[;\n]", str(text)) if p.strip()]
-        return OCRRecord(image=str(image), texts=parts, scores=[1.0] * len(parts))
+        record = OCRRecord(image=str(image), texts=parts, scores=[1.0] * len(parts))
+        self._last_ocr = record
+        return record
+
+    def _current_ocr(self) -> OCRRecord:
+        return self._last_ocr if self._last_ocr is not None else self.ocr("")
 
     # -- belief views ------------------------------------------------------
     def belief_views(self, question: str, answer: str, claim_text: str) -> List[VerificationView]:
@@ -180,7 +189,7 @@ class MockProvider:
 
     # -- direct verification ----------------------------------------------
     def direct_verification(self, question: str, answer: str, claim_text: str, claim_type: str) -> DirectVerification:
-        ocr = self.ocr("image")
+        ocr = self._current_ocr()
         ocr_text = " ".join(ocr.texts).lower()
         claim_words = {w for w in _WORD_RE.findall(claim_text.lower()) if w not in _STOP}
         hit = len([w for w in claim_words if w in ocr_text]) / max(len(claim_words), 1)

@@ -143,6 +143,44 @@ def test_fit_rejects_records_that_produce_no_claims():
         QACDPipeline(provider=_provider()).fit([])
 
 
+def test_image_argument_reaches_the_provider_exactly_once():
+    """Regression: score() used to drop the image, so claim-level mechanical
+    features were always computed against an empty OCR result."""
+
+    class _RecordingProvider(MockProvider):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.ocr_calls = []
+
+        def ocr(self, image):
+            self.ocr_calls.append(image)
+            return super().ocr(image)
+
+    provider = _RecordingProvider(image_text="Dakota Digital; open 24 days")
+    pipeline = QACDPipeline(provider=provider, config=QACDConfig(k=2))
+    pipeline.fit(_dev_records())
+
+    provider.ocr_calls.clear()
+    pipeline.score("What brand is the camera?", "Dakota Digital", "photo_42.jpg")
+    assert provider.ocr_calls == ["photo_42.jpg"], "image must be read once, and passed through"
+
+
+def test_claim_rows_uses_the_supplied_ocr_texts():
+    """Features must be built from the OCR of the image under test.
+
+    The answer carries two spans so the fallback decomposition yields
+    unconditional claims whose text can match the image text verbatim.
+    """
+    pipeline = QACDPipeline(provider=_provider())
+    answer = "Dakota Digital; open 24 days"
+
+    _, _, rows_hit, _ = pipeline._claim_rows("Describe.", answer, "img.jpg", ["Dakota Digital"])
+    _, _, rows_miss, _ = pipeline._claim_rows("Describe.", answer, "img.jpg", ["completely unrelated"])
+
+    assert rows_hit[0]["mech_ocr_exact_present"] > rows_miss[0]["mech_ocr_exact_present"]
+    assert rows_hit[0]["mech_ocr_absent_risk"] < rows_miss[0]["mech_ocr_absent_risk"]
+
+
 def test_threshold_controls_the_flag():
     pipeline = QACDPipeline(provider=_provider(), config=QACDConfig(threshold=0.999))
     pipeline.fit(_dev_records())

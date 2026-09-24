@@ -33,30 +33,20 @@ SUBTopic = "子课题1"
 REPO = "https://github.com/hlcccc/QACD"
 PAPER = "待投稿（暂无公开链接）"
 OWNER = "（待作者补充）"
-STAGE = "论文撰写中（实验已冻结）"
+STAGE = "论文撰写中"
 
 ROWS = [
     # --- 技术点 1 -------------------------------------------------------
     [
-        "QACD 回答错误风险评分器（问题条件化原子主张分解 + 结构化证据校准）",
-        "面向冻结 LVLM 视觉问答回答的后处理错误风险评分。先将回答改写为以问题为语境的原子主张"
-        "（11 类主张类型 + 类型化验证路由），再汇集信念一致性、直接验证与证据对齐特征，"
-        "用 L2 正则化逻辑校准器（λ=0.05）映射为主张级风险，最后以最大值算子聚合为回答级风险分。"
-        "不重训、不改动被评估模型，纯黑盒（仅需回答文本与图像）。",
+        "QACD 回答错误风险评分器",
+        "采用问题条件化原子主张分解 + 结构化证据校准双架构，覆盖 11 类主张类型与类型化验证路由，"
+        "输出回答级错误风险分。黑盒后处理，不改动被评估模型。",
         '{"question": "string", "answer": "string", "image": "string(optional)", '
-        '"threshold": "float(optional)", "return_claims": "bool(optional, 默认 true)"}',
-        '{"risk_score": "float(0-1)", "is_high_risk": "bool", "threshold": "float", '
-        '"num_claims": "int", "claims": [{"claim_id": "string", "claim_text": "string", '
-        '"claim_type": "string", "risk": "float"}], "feature_dim": "int", '
-        '"model_calls": "int", "latency_ms": "int", "version": "string", '
-        '"warnings": "list[string]", "channels": "object"}',
-        "接口契约见仓库 docs/02-接口文档.md。pip install -r requirements.txt 后执行 "
-        "python -m pytest -q 可离线自测（62 项，无需 GPU）。用平台自有开发集执行 "
-        "qacd fit --data dev.jsonl --out scorer.json 拟合打分器，再执行 "
-        "qacd serve --scorer scorer.json 起 HTTP 服务，端点 POST /v1/qacd/risk。"
-        "平台必须拦截 warnings 中的 \"scorer is not fitted\"。",
-        "单卡 ≥40 GB 显存（LLaVA-1.5-13B fp16 约 26 GB）；决策层仅依赖 NumPy，CPU 可跑；"
-        "每回答 7.65 次模型调用（不含重采样）",
+        '"threshold": "float(optional)"}',
+        '{"risk_score": "float(0-1)", "is_high_risk": "bool", "num_claims": "int", '
+        '"claims": "list[object]", "version": "string"}',
+        "使用 GitHub 链接中提供的 qacd 包与 run.py，本地运行环境依赖见 GitHub requirements.txt",
+        "单卡 40G 显存",
         STAGE,
         PAPER,
         REPO,
@@ -65,19 +55,13 @@ ROWS = [
     # --- 技术点 2 -------------------------------------------------------
     [
         "MVR 多视图重采样一致性通道",
-        "对同一 prompt 采样 K 次生成，将每个采样串与图像 OCR 文字做确定性机械核对，输出不支撑比例、"
-        "全不支撑/全支撑标志、模糊相似度的均值/最小/标准差/最优共 7 项稳定性特征，"
-        "由响应级逻辑融合头与证据分联合消费。用于解决“模型稳定地犯同一个错时采样一致性失效”的问题。",
-        '{"sampled_answers": "list[string]（同一 prompt 的 K 次采样，按序）", '
-        '"ocr_texts": "list[string]", "k": "int(optional)"}',
-        '{"k_used": "int", "features": {"mvr_unsupported_rate": "float(0-1)↑风险", '
-        '"mvr_all_unsupported": "float{0,1}", "mvr_all_supported": "float{0,1}", '
-        '"mvr_fuzzy_mean": "float", "mvr_fuzzy_min": "float", "mvr_fuzzy_std": "float", '
-        '"mvr_fuzzy_best_of_k": "float"}, "note": "string"}',
-        "端点 POST /v1/qacd/mvr。K 是成本/精度旋钮：K=0/2/3/5 对应回答级 AUROC "
-        "0.8382/0.8448/0.8498/0.8526，每回答生成调用 +0/+2/+3/+5。K=3 为性价比拐点，"
-        "K=5 为实测最佳。该通道不是独立检测器，必须与证据分联合使用。",
-        "复用被评估 LVLM，无额外显存；每回答增加 K 次生成调用",
+        "采用同 prompt 多采样 + 图像文字机械核对双通道，覆盖 K 次采样的稳定性统计，"
+        "输出 7 维一致性特征。需与主打分器联合使用。",
+        '{"sampled_answers": "list[string]", "ocr_texts": "list[string]", "k": "int(optional)"}',
+        '{"k_used": "int", "features": "object(7 维稳定性特征)"}',
+        "使用 GitHub 链接中提供的 qacd.mvr_features 接口，K 建议取 3，"
+        "本地运行环境依赖见 GitHub requirements.txt",
+        "复用主模型，无额外显存",
         STAGE,
         PAPER,
         REPO,
@@ -85,25 +69,15 @@ ROWS = [
     ],
     # --- 技术点 3 -------------------------------------------------------
     [
-        "机械 OCR 仪器通道（图像文字确定性核对）",
-        "把“让模型自己判断”换成确定性比对：OCR 读出图像文字，与主张串计算精确匹配、包含关系、"
-        "序列相似度、词召回/精确率、字符覆盖、数字存在性等 19 项特征"
-        "（冻结配置完整机械族 28 维，另含 CLIP 探针与计数探针）。"
-        "动机来自诊断：主张文本出现在图像文字中的比例，正确答案为 64.8%、错误答案仅 37.1%；"
-        "而纯模态验证器在约 94% 的回答上都判“有支持”。纯机械通道单独可达 AUROC 0.7431。",
+        "机械 OCR 仪器通道",
+        "采用 OCR 文字确定性比对架构，覆盖精确匹配、包含关系、序列相似度、词召回与数字核对，"
+        "输出 19 项机械核对特征。",
         '{"claim_text": "string", "ocr_texts": "list[string]", '
         '"ocr_scores": "list[float](optional)"}',
-        '{"features": {"mech_ocr_exact_present": "float", "mech_ocr_best_similarity": "float", '
-        '"mech_ocr_best_token_recall": "float", "mech_ocr_char_coverage": "float", '
-        '"mech_ocr_number_present": "float", "mech_ocr_absent_risk": "float↑风险", '
-        '"mech_ocr_low_similarity_risk": "float↑风险", "mech_ocr_low_recall_risk": "float↑风险", '
-        '"mech_ocr_number_missing_risk": "float↑风险", "…": "共 19 项，详见接口文档"}, '
-        '"family_size_in_frozen_config": "int", "note": "string"}',
-        "端点 POST /v1/qacd/mechanical，依赖 pip install rapidocr-onnxruntime。"
-        "OCR 结果为空时返回 mech_ocr_empty=1.0 且不报错。"
-        "该通道面向含场景文字的图像设计（TextVQA 中仅 4.93% 图像无文字）；"
-        "若目标场景图像普遍无文字，需先在该分布上重估通道权重。",
-        "OCR 可在 CPU 运行；无额外 GPU 显存需求",
+        '{"features": "object(19 项机械特征)", "note": "string"}',
+        "使用 GitHub 链接中提供的 qacd.mechanical_ocr_features 接口 + RapidOCR，"
+        "本地运行环境依赖见 GitHub requirements.txt",
+        "CPU 运行，无显存需求",
         STAGE,
         PAPER,
         REPO,
@@ -112,22 +86,14 @@ ROWS = [
     # --- 技术点 4 -------------------------------------------------------
     [
         "保形选择性预测与弃权",
-        "在校准集（已知正确样本的风险分）上构造 class-conditional conformal p-value，"
-        "再用 BH（独立性/PRDS）或 BY（任意依赖）多重性程序选出可接受的图像/回答子集，"
-        "以控制被接受样本中的错误比例。返回覆盖率、正确保留率与 realized FDP，"
-        "供平台按自身错误成本选择工作点。",
-        '{"calibration_null_scores": "list[float]（校准集中已知正确样本的风险分）", '
-        '"test_scores": "list[float]", "alpha": "float(0-1, 默认 0.10)", '
-        '"procedure": "string(\\"BY\\" | \\"BH\\")", '
-        '"test_labels": "list[int](optional, 仅用于回报 realized FDP)"}',
-        '{"accepted": "list[bool]", "num_accepted": "int", "num_items": "int", '
-        '"coverage": "float", "procedure": "string", "alpha": "float", '
-        '"realized_fdp": "float|null", "validated": "bool", '
-        '"notes": "list[string]"}',
-        "端点 POST /v1/qacd/select。校准集规模直接决定可用覆盖率，"
-        "建议先用平台历史数据试跑一版看曲线形状，再定工作点。"
-        "test_labels 只用于回报 realized FDP，不参与选择。",
-        "无额外资源；纯 CPU 计算",
+        "采用 class-conditional conformal p-value + BH/BY 多重性控制架构，"
+        "输出覆盖率、正确保留率与 realized FDP，支持按错误代价选择工作点。",
+        '{"calibration_null_scores": "list[float]", "test_scores": "list[float]", '
+        '"alpha": "float(optional)", "procedure": "string(optional)"}',
+        '{"accepted": "list[bool]", "coverage": "float", "realized_fdp": "float|null"}',
+        "使用 GitHub 链接中提供的 qacd.conformal_select 接口，"
+        "本地运行环境依赖见 GitHub requirements.txt",
+        "CPU 运行，无显存需求",
         STAGE,
         PAPER,
         REPO,
@@ -287,10 +253,10 @@ def main() -> int:
         document,
         ["序号", "技术点", "是否可纳入平台建设", "说明"],
         [
-            ["1", "QACD 核心打分器", "可以", "接口已就绪；需平台提供开发集与 LVLM 推理环境"],
+            ["1", "QACD 核心打分器", "可以", "接口已定义；需接入平台 LVLM 与带标签开发集后产出打分器"],
             ["2", "MVR 多视图重采样通道", "可以", "依赖同一 LVLM 的多次采样能力"],
-            ["3", "机械 OCR 仪器通道", "可以", "无 GPU 依赖；面向含场景文字的图像设计"],
-            ["4", "保形选择性预测与弃权", "可以", "纯 CPU 计算；工作点在平台自有校准批次上标定"],
+            ["3", "机械 OCR 仪器通道", "可以", "无 GPU 依赖，可独立验证"],
+            ["4", "保形选择性预测与弃权", "可以", "纯 CPU 计算，工作点在平台自有校准批次上标定"],
         ],
         widths=[Inches(0.5), Inches(1.7), Inches(1.3), Inches(2.8)],
     )
