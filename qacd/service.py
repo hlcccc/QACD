@@ -9,10 +9,15 @@
 Run with::
 
     pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"
-    qacd serve --scorer configs/reference_scorer.json --port 8080
+    python run.py serve --scorer scorer.json --port 8080
 
-FastAPI is an optional dependency: importing :mod:`qacd` does not import it, and
-this module raises a clear error if the extra is missing.
+FastAPI is an optional dependency. Importing :mod:`qacd` does not import this
+module; importing it without the service extra succeeds but :func:`create_app`
+raises with install instructions.
+
+The request and response models are declared at module level on purpose. Defined
+inside a function, Pydantic cannot resolve their mutual annotations and every
+route fails with a 422 "Field required" for a forward reference.
 """
 
 from __future__ import annotations
@@ -24,50 +29,33 @@ from qacd.mechanical import MECHANICAL_FAMILY_SIZE, mechanical_ocr_features, mvr
 from qacd.pipeline import QACDPipeline
 from qacd.providers import MockProvider
 
-__all__ = ["create_app", "SERVICE_VERSION"]
+__all__ = ["create_app", "SERVICE_VERSION", "SERVICE_AVAILABLE"]
 
 SERVICE_VERSION = "1.0.0"
 
+SERVICE_INSTALL_HINT = (
+    "Service mode needs the service extra: "
+    'pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"'
+)
 
-def _require_fastapi():
-    try:
-        from fastapi import Body, FastAPI, HTTPException  # noqa: F401
-        from pydantic import BaseModel, Field  # noqa: F401
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise ImportError(
-            "Service mode needs the service extra: "
-            'pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"'
-        ) from exc
-    from fastapi import Body, FastAPI, HTTPException
-    from pydantic import BaseModel, Field
+try:  # pragma: no cover - exercised by the import guard test
+    from fastapi import Body, FastAPI, HTTPException  # noqa: F401
+    from pydantic import BaseModel, Field  # noqa: F401
 
-    return FastAPI, Body, HTTPException, BaseModel, Field
+    SERVICE_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency
+    SERVICE_AVAILABLE = False
 
 
-def create_app(pipeline: Optional[QACDPipeline] = None, scorer_path: str | None = None):
-    """Build the FastAPI application.
+if SERVICE_AVAILABLE:
 
-    Parameters
-    ----------
-    pipeline:
-        A ready pipeline. Mutually exclusive with ``scorer_path``.
-    scorer_path:
-        Path to a JSON scorer exported by :meth:`QACDPipeline.save`.
-    """
-    FastAPI, Body, HTTPException, BaseModel, Field = _require_fastapi()
-
-    if pipeline is None:
-        if scorer_path:
-            pipeline = QACDPipeline.load(scorer_path, provider=MockProvider())
-        else:
-            pipeline = QACDPipeline(provider=MockProvider())
-
-    # ---- request / response models ------------------------------------
     class RiskRequest(BaseModel):
         question: str = Field(..., description="VQA question text")
         answer: str = Field(..., description="Frozen LVLM answer to be scored")
         image: str = Field("", description="Image path, URL or opaque identifier")
-        threshold: Optional[float] = Field(None, description="Override the frozen warning threshold")
+        threshold: Optional[float] = Field(
+            None, description="Override the frozen warning threshold"
+        )
         return_claims: bool = Field(True, description="Include per-claim risks in the response")
 
     class ClaimOut(BaseModel):
@@ -90,8 +78,12 @@ def create_app(pipeline: Optional[QACDPipeline] = None, scorer_path: str | None 
         channels: Dict[str, float] = {}
 
     class MVRRequest(BaseModel):
-        sampled_answers: List[str] = Field(..., description="K same-prompt generations, in order")
-        ocr_texts: List[str] = Field(default_factory=list, description="OCR strings read from the image")
+        sampled_answers: List[str] = Field(
+            ..., description="K same-prompt generations, in order"
+        )
+        ocr_texts: List[str] = Field(
+            default_factory=list, description="OCR strings read from the image"
+        )
         k: Optional[int] = Field(None, description="How many samples to use; default all")
 
     class MechanicalRequest(BaseModel):
@@ -100,11 +92,37 @@ def create_app(pipeline: Optional[QACDPipeline] = None, scorer_path: str | None 
         ocr_scores: List[float] = Field(default_factory=list)
 
     class SelectRequest(BaseModel):
-        calibration_null_scores: List[float] = Field(..., description="Risk scores of known-correct calibration items")
+        calibration_null_scores: List[float] = Field(
+            ..., description="Risk scores of known-correct calibration items"
+        )
         test_scores: List[float]
         alpha: float = 0.10
-        procedure: str = Field("BY", description="'BH' (independence/PRDS) or 'BY' (arbitrary dependence)")
-        test_labels: Optional[List[int]] = Field(None, description="Optional; used only to report realised FDP")
+        procedure: str = Field(
+            "BY", description="'BH' (independence/PRDS) or 'BY' (arbitrary dependence)"
+        )
+        test_labels: Optional[List[int]] = Field(
+            None, description="Optional; used only to report realised FDP"
+        )
+
+
+def create_app(pipeline: Optional[QACDPipeline] = None, scorer_path: str | None = None):
+    """Build the FastAPI application.
+
+    Parameters
+    ----------
+    pipeline:
+        A ready pipeline. Mutually exclusive with ``scorer_path``.
+    scorer_path:
+        Path to a JSON scorer exported by :meth:`QACDPipeline.save`.
+    """
+    if not SERVICE_AVAILABLE:  # pragma: no cover - optional dependency
+        raise ImportError(SERVICE_INSTALL_HINT)
+
+    if pipeline is None:
+        if scorer_path:
+            pipeline = QACDPipeline.load(scorer_path, provider=MockProvider())
+        else:
+            pipeline = QACDPipeline(provider=MockProvider())
 
     app = FastAPI(
         title="QACD integration service",

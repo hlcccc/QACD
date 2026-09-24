@@ -1,8 +1,8 @@
-# QACD — 问题条件化原子主张分解
+﻿# QACD — 问题条件化原子主张分解
 
 **面向 LVLM 视觉问答的回答级错误风险后处理评分**
 
-[![tests](https://img.shields.io/badge/tests-114%20passed-brightgreen)](#快速开始)
+[![tests](https://img.shields.io/badge/tests-128%20passed-brightgreen)](#快速开始)
 [![python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-proprietary-lightgrey)](NOTICE.md)
 
@@ -114,7 +114,7 @@ python scripts/run_frozen_evaluation.py --bundle artifacts/evidence_bundle.npz -
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 114 项测试，全部离线
+python -m pytest -q                  # 128 项测试，全部离线
 python scripts/demo_offline.py       # 端到端离线演示（合成开发集）
 python scripts/run_frozen_evaluation.py \
     --bundle artifacts/evidence_bundle.npz --out results   # 复现冻结结果
@@ -147,7 +147,7 @@ qacd serve --scorer scorer.json --port 8080
 
 | 组件 | 状态 |
 |---|---|
-| 决策层（分解 / 特征 / 校准 / 聚合 / MVR / 保形） | 完整，114 项测试覆盖 |
+| 决策层（分解 / 特征 / 校准 / 聚合 / MVR / 保形） | 完整，128 项测试覆盖 |
 | 评估层（证据包校验 / 指标 / 配对 bootstrap） | 完整，**复现冻结结果** |
 | `MockProvider`（离线确定性桩） | 完整，用于链路自测 |
 | `RapidOCRProvider` | 完整，需 `rapidocr-onnxruntime` |
@@ -193,7 +193,7 @@ QACD/
 ├── docs/                  方法、接口、部署、对接说明
 ├── results/               本仓库跑出的结果 + reported/（研究侧产出）
 ├── scripts/               离线演示 + 冻结结果复现
-└── tests/                 114 项测试
+└── tests/                 128 项测试
 ```
 
 ## 引用
