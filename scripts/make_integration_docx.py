@@ -202,6 +202,11 @@ def main() -> int:
         action="store_true",
         help="keep the worked-example row from the template (row 1) in the table",
     )
+    parser.add_argument(
+        "--table-only",
+        action="store_true",
+        help="fill the table and change nothing else in the template",
+    )
     args = parser.parse_args()
 
     document = docx.Document(args.template)
@@ -222,6 +227,13 @@ def main() -> int:
         # Emphasise the technology name (column 2) for scanability.
         name_run = row.cells[2].paragraphs[0].runs[0]
         name_run.bold = True
+
+    # --table-only: the caller wants the template's own content left alone.
+    # Fill the four blank rows, save, and change nothing else.
+    if args.table_only:
+        document.save(args.out)
+        print(f"[docx] table filled -> {args.out}")
+        return 0
 
     # The template ships a worked example in row 1. It is useful while filling
     # the table in and noise in a submission, so drop it unless explicitly kept.
