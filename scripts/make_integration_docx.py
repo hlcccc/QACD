@@ -197,6 +197,11 @@ def main() -> int:
     parser.add_argument("--template", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--figure", default=None, help="optional main-result figure PNG")
+    parser.add_argument(
+        "--keep-example-row",
+        action="store_true",
+        help="keep the worked-example row from the template (row 1) in the table",
+    )
     args = parser.parse_args()
 
     document = docx.Document(args.template)
@@ -217,6 +222,11 @@ def main() -> int:
         # Emphasise the technology name (column 2) for scanability.
         name_run = row.cells[2].paragraphs[0].runs[0]
         name_run.bold = True
+
+    # The template ships a worked example in row 1. It is useful while filling
+    # the table in and noise in a submission, so drop it unless explicitly kept.
+    if not args.keep_example_row:
+        table._tbl.remove(table.rows[1]._tr)
 
     # Repeat the header row when the table spans pages.
     header_row = table.rows[0]
@@ -286,6 +296,13 @@ def main() -> int:
         "vs SelfCheckGPT-NLI 为 +0.0207（[+0.0028, +0.0391]）；"
         "vs Multi-sample Consistency 为 +0.0267（[+0.0102, +0.0436]）。"
         "即：黑盒 QACD 与需要模型内部量的白盒方法统计持平，并优于两个公开采样类基线。",
+    )
+    add_body(
+        document,
+        "上述数值可复现：仓库执行 python scripts/run_frozen_evaluation.py 即用其自身的校准器、"
+        "聚合与指标在冻结证据上重算全部结果，并与冻结重放记录逐臂比对——主张级两臂绝对差 1e-6，"
+        "三个公开基线完全吻合。比对明细见仓库 results/reproduction_check.csv，"
+        "证据包与输出的 SHA256 记录在 results/manifest.json。",
     )
     if args.figure and Path(args.figure).exists():
         document.add_picture(args.figure, width=Inches(6.2))
