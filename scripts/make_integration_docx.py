@@ -101,6 +101,30 @@ ROWS = [
     ],
 ]
 
+#: The single technology point for 课题2 (基于不确定性量化的风险评估与校准方法).
+#: Wording follows the project application SQ2025AAA011084: multi-dimensional
+#: uncertainty decoupling, cross-modal semantic fidelity and generation-space
+#: uncertainty quantification, risk-uncertainty calibration, and early warning
+#: for high-risk generated content.
+TOPIC2_ROWS = [
+    [
+        "基于不确定性量化的多模态生成内容风险评估与校准",
+        "采用多维不确定性解耦 + 风险-不确定性映射校准双架构，覆盖跨模态语义保真度、"
+        "生成空间不确定性与证据一致性，输出生成内容风险分与校准概率，支持高风险内容提前预警。"
+        "黑盒后处理，不改动被评估模型。",
+        '{"question": "string", "answer": "string", "image": "string(optional)", '
+        '"threshold": "float(optional)"}',
+        '{"risk_score": "float(0-1)", "is_high_risk": "bool", '
+        '"calibrated_confidence": "float", "num_claims": "int", "version": "string"}',
+        "使用 GitHub 链接中提供的 qacd 包与 run.py，本地运行环境依赖见 GitHub requirements.txt",
+        "单卡 40G 显存",
+        STAGE,
+        PAPER,
+        REPO,
+        "湖南大学（待补充）",
+    ],
+]
+
 FONT = "等线"
 CELL_SIZE = Pt(8)
 
@@ -207,6 +231,11 @@ def main() -> int:
         action="store_true",
         help="fill the table and change nothing else in the template",
     )
+    parser.add_argument(
+        "--topic2",
+        action="store_true",
+        help="fill the single 课题2 row instead of the four技术点 rows",
+    )
     args = parser.parse_args()
 
     document = docx.Document(args.template)
@@ -220,7 +249,8 @@ def main() -> int:
 
     # Row 0 is the header, row 1 the template example, rows 2-5 the four blanks.
     # Column 0 already holds the sequence numbers 1..4; column 1 is 所属子课题.
-    for offset, values in enumerate(ROWS):
+    rows = TOPIC2_ROWS if args.topic2 else ROWS
+    for offset, values in enumerate(rows):
         row = table.rows[2 + offset]
         for col, value in enumerate([SUBTopic] + list(values), start=1):
             write_cell(row.cells[col], value)
