@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """Generate the 课题一 technical integration Word document from the template.
 
 Usage::
@@ -19,6 +19,7 @@ numbers or the interface change. Keep `docs/05-课题一技术对接表.md` in s
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import docx
@@ -200,6 +201,26 @@ def set_table_borders(table) -> None:
     tbl_pr.append(borders)
 
 
+def load_results(path):
+    """Load the supplementary result section from an external JSON file.
+
+    Experimental values are a project deliverable and are deliberately not
+    stored in this repository. The file is a mapping with the keys ``summary``,
+    ``columns``, ``rows``, ``contrasts`` and optional ``reproduction`` /
+    ``figure_caption``; ``rows`` is a list of lists matching ``columns``.
+    Returns ``None`` when no path is given.
+    """
+    if not path:
+        return None
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    missing = [key for key in ("summary", "columns", "rows", "contrasts") if key not in payload]
+    if missing:
+        raise SystemExit(f"results file {path} is missing keys: {missing}")
+    if len(payload["columns"]) != len(payload["rows"][0]):
+        raise SystemExit("results file: each row must have one entry per column")
+    return payload
+
+
 def add_simple_table(document, header, rows, widths=None):
     table = document.add_table(rows=1, cols=len(header))
     set_table_borders(table)
@@ -221,6 +242,14 @@ def main() -> int:
     parser.add_argument("--template", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--figure", default=None, help="optional main-result figure PNG")
+    parser.add_argument(
+        "--results-file",
+        default=None,
+        help="JSON file holding the result rows for the supplementary section. "
+             "Experimental values are a project deliverable and are deliberately "
+             "not stored in this repository; without this file the section is "
+             "replaced by a note.",
+    )
     parser.add_argument(
         "--keep-example-row",
         action="store_true",
@@ -313,48 +342,35 @@ def main() -> int:
         widths=[Inches(0.5), Inches(1.7), Inches(1.3), Inches(2.8)],
     )
 
-    # --- 2 关键数值 -----------------------------------------------------
-    add_heading(document, "二、关键结果（冻结 TextVQA 测试集）")
-    add_body(
-        document,
-        "测试集规模：1,999 条回答 / 1,278 张开发未见图像 / 836 条失败（41.8%）。"
-        "配对图像级 bootstrap 5,000 次，随机种子固定。",
-    )
-    add_simple_table(
-        document,
-        ["方法", "回答级 AUROC", "图像级 AUROC", "备注"],
-        [
-            ["UMPIRE K=5", "0.8564", "0.8561", "白盒，需要模型内部量"],
-            ["QACD（LM + 机械仪器 + MVR K=5）", "0.8526", "—", "黑盒，本课题方法"],
-            ["SelfCheckGPT-NLI K=5", "0.8319", "0.8477", "公开基线"],
-            ["Multi-sample Consistency K=5", "0.8258", "0.8363", "公开基线"],
-            ["QACD（原始 95 维配置）", "0.7991", "—", "早期配置"],
-        ],
-        widths=[Inches(2.5), Inches(1.1), Inches(1.1), Inches(1.6)],
-    )
-    add_body(
-        document,
-        "配对对比：vs UMPIRE K=5 为 −0.0039（95% CI [−0.0195, +0.0124]，区间跨 0，统计持平）；"
-        "vs SelfCheckGPT-NLI 为 +0.0207（[+0.0028, +0.0391]）；"
-        "vs Multi-sample Consistency 为 +0.0267（[+0.0102, +0.0436]）。"
-        "即：黑盒 QACD 与需要模型内部量的白盒方法统计持平，并优于两个公开采样类基线。",
-    )
-    add_body(
-        document,
-        "上述数值可复现：仓库执行 python scripts/run_frozen_evaluation.py 即用其自身的校准器、"
-        "聚合与指标在冻结证据上重算全部结果，并与冻结重放记录逐臂比对——主张级两臂绝对差 1e-6，"
-        "三个公开基线完全吻合。比对明细见仓库 results/reproduction_check.csv，"
-        "证据包与输出的 SHA256 记录在 results/manifest.json。",
-    )
-    if args.figure and Path(args.figure).exists():
-        document.add_picture(args.figure, width=Inches(6.2))
-        document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        caption = document.add_paragraph()
-        caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = caption.add_run(
-            "图 1  左：冻结测试集上的回答级 AUROC 对比；右：配对图像级 bootstrap 的 ΔAUROC 与 95% 置信区间"
+    # --- 2 关键结果 -----------------------------------------------------
+    # Experimental values are a project deliverable and are deliberately not
+    # stored in this repository. They arrive through --results-file.
+    results = load_results(args.results_file)
+    add_heading(document, "二、关键结果")
+    if results is None:
+        add_body(
+            document,
+            "关键结果数值属于项目交付物，未随本工具一并存储。传入 --results-file 指向结果 "
+            "JSON 后重新生成，即可载入结果表、配对对比与结果图。",
         )
-        set_run_font(run, size=Pt(8.5))
+    else:
+        add_body(document, results["summary"])
+        add_simple_table(
+            document,
+            results["columns"],
+            results["rows"],
+            widths=[Inches(2.5), Inches(1.1), Inches(1.1), Inches(1.6)],
+        )
+        add_body(document, results["contrasts"])
+        if results.get("reproduction"):
+            add_body(document, results["reproduction"])
+        if args.figure and Path(args.figure).exists():
+            document.add_picture(args.figure, width=Inches(6.2))
+            document.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            caption = document.add_paragraph()
+            caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = caption.add_run(results.get("figure_caption", "图 1  结果对比"))
+            set_run_font(run, size=Pt(8.5))
 
     # --- 3 资源与工作量 -------------------------------------------------
     add_heading(document, "三、资源需求与工作量预估")
@@ -366,7 +382,7 @@ def main() -> int:
             "决策层：仅依赖 NumPy，CPU 可运行，无 GPU 需求。",
             "模型调用次数（算力成本代理）：LM 通道本身 7.65 次/回答；"
             "4 视图 + MVR K=5 为 12.61 次；每增加 1 层采样 +1 次。",
-            "成本优化建议：视图数由 4 降至 1，精度无统计可辨差异（AUROC 0.8509 → 0.8515，区间跨 0），"
+            "成本优化建议：视图数由 4 降至 1，实测精度无可辨差异，"
             "而调用次数由 12.61 降至 9.61（K=5 时减少 24%）。受算力约束时优先降视图数，不要降 K。",
             "开发集规模：学习曲线显示 300 条尚未饱和，增益大部分在约 1,200 条时已实现。"
             "平台接入新领域建议准备 ≥1,200 条带标签回答再冻结打分器。",

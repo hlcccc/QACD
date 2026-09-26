@@ -20,32 +20,22 @@ result = pipeline.score(
 print(result.risk_score, result.is_high_risk, result.num_claims)
 ```
 
-## Headline result
+## Experimental data
 
-Frozen TextVQA test split — **1,999 responses / 1,278 unseen images / 836 failures (41.8%)**:
+This repository ships **without** experimental data or result values; the frozen
+feature matrices, raw evidence tables and result tables are project deliverables
+and are not published here. What ships is the method and the runnable code.
 
-| Method | Response AUROC | Image AUROC | Note |
-|---|---:|---:|---|
-| UMPIRE K=5 | 0.8564 | 0.8561 | white-box, needs model internals |
-| **QACD (LM + mechanical instruments + MVR K=5)** | **0.8526** | — | **black-box** |
-| SelfCheckGPT-NLI K=5 | 0.8319 | 0.8477 | public baseline |
-| Multi-sample Consistency K=5 | 0.8258 | 0.8363 | public baseline |
-| QACD (original 95-D) | 0.7991 | — | earlier configuration |
+To run the verification scripts, export the data from the research host first:
 
-Paired image-level bootstrap (5,000 draws):
+```bash
+python tools/export_raw_evidence.py    # raw evidence tables -> artifacts/raw/
+python tools/export_bundle.py          # feature matrix + reference scores -> artifacts/
+```
 
-| Comparison | ΔAUROC | 95% CI | Reading |
-|---|---:|---|---|
-| vs UMPIRE K=5 (white-box) | −0.0039 | [−0.0195, +0.0124] | **statistical parity** |
-| vs SelfCheckGPT-NLI K=5 | +0.0207 | [+0.0028, +0.0391] | ahead |
-| vs Multi-sample Consistency K=5 | +0.0267 | [+0.0102, +0.0436] | ahead |
-
-The black-box scorer reaches parity with a white-box method that consumes model
-internals, and beats two published sampling-based baselines.
-
-Evaluation setting: frozen TextVQA test split (1,999 responses / 1,278 unseen
-images / 836 failures), paired image-level bootstrap with 5,000 draws and a fixed
-seed. All calibrators are fitted on the development split only.
+Without it those scripts exit with status **2** and name the missing inputs; they
+never pass silently on empty input. The 14 data-dependent tests report as
+`skipped` (`pytest -rs` prints why); the other 162 need no data.
 
 ## Pipeline
 
@@ -68,7 +58,7 @@ The decision layer depends on **NumPy only** — no GPU, no model weights:
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 176 tests, fully offline
+python -m pytest -q                  # 162 passed + 14 skipped (data-dependent)
 python scripts/demo_offline.py       # end-to-end demo on a synthetic dev set
 qacd demo
 

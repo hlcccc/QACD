@@ -40,7 +40,9 @@ include = ["qacd*", "evaluation*", "frozen*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# -rs prints why a test was skipped; the artifact-backed tests skip when the
+# experimental data is absent, and that must be visible, not silent.
+addopts = "-q -rs"
 filterwarnings = [
   # The ported research feature engineering inserts columns one at a time,
   # which pandas reports as fragmentation. Behaviour is unaffected.

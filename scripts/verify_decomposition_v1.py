@@ -135,7 +135,16 @@ def main() -> int:
     parser.add_argument("--splits", nargs="*", default=["dev", "test"])
     args = parser.parse_args()
 
+    from evaluation.data import DATA_ABSENT_EXIT, require_data
+
     raw = Path(args.raw)
+    absent = require_data(
+        [raw / f"{split}_claims.csv.gz" for split in args.splits],
+        "verify qacd.decompose_v1 against the frozen claim tables",
+    )
+    if absent is not None:
+        return absent
+
     print("=" * 88)
     print("Verifying qacd.decompose_v1 against the frozen claim tables")
     print("=" * 88)

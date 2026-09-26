@@ -67,7 +67,16 @@ def main() -> int:
     parser.add_argument("--tolerance", type=float, default=TOLERANCE)
     args = parser.parse_args()
 
+    from evaluation.data import require_data
+
     raw_dir = Path(args.raw)
+    absent = require_data(
+        [args.bundle, raw_dir / "dev_features.csv.gz", raw_dir / "test_features.csv.gz"],
+        "verify the feature port",
+    )
+    if absent is not None:
+        return absent
+
     bundle = np.load(args.bundle, allow_pickle=False)
     reference_names = [str(x) for x in bundle["lm_names"]] + [str(x) for x in bundle["mechanical_names"]]
     score_train_images = set(str(x) for x in bundle["score_train_images"])

@@ -53,8 +53,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    bundle = np.load(args.bundle, allow_pickle=False)
+    from evaluation.data import require_data
+
     raw = Path(args.raw)
+    absent = require_data(
+        [args.bundle, raw / "dev_features.csv.gz", raw / "test_features.csv.gz"],
+        "verify the pipeline over the frozen feature set",
+    )
+    if absent is not None:
+        return absent
+
+    bundle = np.load(args.bundle, allow_pickle=False)
 
     print("=" * 90)
     print("QACDPipeline over the frozen feature set")

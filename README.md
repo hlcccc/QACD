@@ -33,57 +33,19 @@ QACD offline demo
   channels : {'evidence_score': 0.279777, 'mvr_unsupported_rate': 0.333333, ...}
 ```
 
-## 主要结果
+## 特征工程
 
-冻结 TextVQA 测试集：**1,999 条回答 / 1,278 张开发未见图像 / 836 条失败（41.8%）**
-
-![主结果与配对对比](docs/assets/fig_main_forest.png)
-
-| 方法 | 回答级 AUROC | 图像级 AUROC | 备注 |
-|---|---:|---:|---|
-| UMPIRE K=5 | 0.8564 | 0.8561 | 白盒，需要模型内部量 |
-| **QACD（LM + 机械仪器 + MVR）** | **0.8495** | **0.8608** | **黑盒，本仓库可复现** |
-| SelfCheckGPT-NLI K=5 | 0.8319 | 0.8477 | 公开基线 |
-| Multi-sample Consistency K=5 | 0.8258 | 0.8363 | 公开基线 |
-| QACD LM-only | 0.7989 | 0.8225 | 仅 LM 证据通道 |
-
-配对图像级 bootstrap（5,000 次，本仓库计算）：
-
-| 对比 | ΔAUROC | 95% CI | 判读 |
-|---|---:|---|---|
-| vs UMPIRE K=5（白盒） | −0.0067 | [−0.0230, +0.0092] | **统计持平**（区间跨 0） |
-| vs SelfCheckGPT-NLI K=5 | +0.0177 | [−0.0001, +0.0356] | 领先 |
-| vs Multi-sample Consistency K=5 | +0.0238 | [+0.0069, +0.0409] | 领先 |
-
-**黑盒 QACD 与需要模型内部量的白盒方法统计持平，并优于两个公开采样类基线。**
-
-> 另有一套特征更多的 135 维配置（LM 95 + 机械 28 + MVR）在真机上报告过 0.8526。
-> 它是**不同的配置**，不是同一模型的更好结果，本仓库未重跑；数值见
-> `results/reported/configuration_sweep.csv`。上表用的是本仓库能逐臂复现的 112 维协议。
-
-评估设置：冻结 TextVQA 测试集（1,999 条回答 / 1,278 张开发未见图像 / 836 条失败），
-配对图像级 bootstrap 5,000 次，随机种子固定。全部校准器仅用开发集拟合。
-
-## 特征工程也在仓库里
-
-`frozen/` 是研究流水线特征工程的逐行移植（原先只有数据、没有代码）：
+`frozen/` 是研究流水线特征工程的逐行移植：
 
 ```
 frozen/constants.py   特征族名称表（逐字转录，顺序即冻结系数所绑定顺序）
 frozen/features.py    派生规则：方向对齐 → 矛盾感知 v2 → QACD 感知 → 直接验证器
 frozen/build.py       划分、特征选择、中位数填补、矩阵装配
+frozen/assemble.py    逐条 claim 装配 112 维特征向量
 ```
 
-移植结果**逐元素对齐**（`scripts/verify_feature_port.py`）：
-
-```
-dev   max|diff| = 0.000e+00
-test  max|diff| = 0.000e+00
-imputer medians max|diff| = 0.000e+00
-```
-
-也就是说，把原始证据表喂给仓库代码，得到的 3025×112 / 2020×112 特征矩阵与
-冻结时**逐位相同**。这是让"从原始证据到风险分"这条端到端链路真正闭合的一步。
+所有派生规则都是逐行的，因此单条 claim 可以独立装配 —— 这是该特征集能用于在线打分、
+而不只是批处理的原因。
 
 > 移植中唯一的有意偏离：研究代码里有两个**同名但行为不同**的 `_num` ——
 > `run_bew_bcm_v2._num` 不填补不截断（`add_contradiction_aware_features` 依赖
@@ -91,17 +53,10 @@ imputer medians max|diff| = 0.000e+00
 > `[0,1]`。合并到同一模块后必须分开，本仓库保存为 `_num_bew` / `_num_dvb`，
 > `tests/test_frozen_features.py` 有专门测试锁住这个区别。
 
-## 分解版本：结果是 v1，代码默认是 v2
+## 分解版本 v1 与 v2
 
-冻结 claim table 里每一行的 `decomposition_method` 都是 **v1**：
-
-| 表 | `rule_fallback_qacd_v1` | `llm_qacd_v1_checked` | v2 |
-|---|---:|---:|---:|
-| 测试（1999 回答 / 2020 claim） | 1330 | 690 | **0** |
-| 开发（3000 回答 / 3025 claim） | 1971 | 1054 | **0** |
-
-提交 `f03b27a`（"Upgrade QACD to validated multi-claim decomposition"）把分解升级到了 v2，
-而 `qacd/decompose.py` 实现的是 v2。两者不只是标签不同：
+产出报告数值的是 **v1**；`qacd/decompose.py`（仓库默认）实现的是 **v2**。
+两者不只是标签不同：
 
 | | v1（产出结果的版本） | v2（当前默认） |
 |---|---|---|
@@ -111,22 +66,34 @@ imputer medians max|diff| = 0.000e+00
 | 引号问句 | 计入长度惩罚 | 剥离后再算 |
 | claim 集合校验 | 无 | 覆盖率 / 原子性 / 重复校验 |
 
-**两个版本都在仓库里**：`qacd/decompose.py`（v2，默认）与 `qacd/decompose_v1.py`（v1，冻结版）。
+**两个版本都在仓库里**：`qacd/decompose.py`（v2，默认）与 `qacd/decompose_v1.py`
+（v1，逐字移植自升级提交 `f03b27a^`）。每一项差异都有测试锁住
+（`tests/test_decompose_v1.py`）。
 
-v1 复现已验证（`scripts/verify_decomposition_v1.py`）—— 用 v1 重新推导冻结表里每一条回退
-claim，11 个字段**全部 100% 一致**：
+## 实验数据与结果
 
+**本仓库不包含实验数据，也不包含结果数值。**
+
+冻结特征矩阵、原始证据表与结果表属于项目交付物，按要求不在本仓库公开。这里保留的是
+**方法与可运行的代码**。要运行下面这些检查，需要先从研究服务器导出数据：
+
+```bash
+python tools/export_raw_evidence.py    # 原始证据表        -> artifacts/raw/
+python tools/export_bundle.py          # 特征矩阵与参考分数 -> artifacts/
 ```
-dev   1971 条 claim, claim_text / claim_type / source_span / atomicity_score ... 均 100%
-test  1330 条 claim, 同上
-claim 数不匹配: 0     混合路径: 0
-```
 
-所以仓库现在能明确指出：`results/` 里的数值来自 **v1 分解 + 112 维冻结特征**。
+| 脚本 | 验证内容 |
+|---|---|
+| `scripts/run_frozen_evaluation.py --from-raw` | 从原始证据重建特征 → 校准 → 聚合 → 指标 |
+| `scripts/verify_feature_port.py` | 112 维特征与冻结矩阵逐元素对齐 |
+| `scripts/verify_decomposition_v1.py` | v1 分解复现冻结 claim table |
+| `scripts/verify_pipeline_frozen.py` | `QACDPipeline` 端到端闭环 |
 
-## 端到端：QACDPipeline 直接用冻结特征打分
+**缺少数据时的行为**：以上脚本以退出码 **2** 明确报出缺失项与恢复步骤，不会抛栈、
+也不会在零输入上报告成功。测试中依赖数据的 14 项显示为 `skipped`
+（`pytest -rs` 会打印原因），其余 162 项不需要任何数据。
 
-`QACDPipeline` 默认走 48 维参考路径；挂上装配器后走 112 维冻结特征：
+数据到位后，`QACDPipeline` 可以直接用冻结特征集打分：
 
 ```python
 from frozen.assemble import FrozenFeatureAssembler
@@ -136,56 +103,6 @@ pipeline = QACDPipeline(assembler=FrozenFeatureAssembler.from_matrices(matrices)
 pipeline.fit_matrix(matrices.dev_matrix, labels, matrices.train_mask)
 claim_risk = pipeline.score_evidence_frame(test_frame)   # 每条 claim 一个风险分
 ```
-
-`scripts/verify_pipeline_frozen.py` 验证这条链：
-
-```
-[OK] dev  assembler vs frozen max|diff| = 0.000e+00
-[OK] test assembler vs frozen max|diff| = 0.000e+00
-[OK] 逐行装配 vs 整表            max|diff| = 0.000e+00
-     response AUROC = 0.834558   vs 冻结重放 0.834559  (diff 1.03e-06)
-```
-
-派生规则全部逐行，所以单条 claim 也能独立装配 —— 这正是冻结特征集能用于在线打分
-而不只是批处理的原因。
-
-## 结果由本仓库代码跑出
-
-`results/` 里的主表不是转录的研究数值，而是这条命令的输出：
-
-```bash
-# 完整端到端：从原始证据表重建特征，再校准、聚合、算指标
-python scripts/run_frozen_evaluation.py --from-raw --out results
-```
-
-`--from-raw` 让整条链路都跑本仓库的代码：
-
-```
-artifacts/raw/*.csv.gz     原始证据表（缓存的模型读数）
-  └─ frozen/               本仓库移植的特征工程（112 维）
-       └─ qacd.calibrate   本仓库的校准器
-            └─ qacd.aggregate  本仓库的聚合
-                 └─ evaluation.metrics  本仓库的指标
-```
-
-它用**本仓库的** `BICLiteCalibrator` 拟合主张级校准器、用**本仓库的**
-`claim_to_response_max` 聚合、用**本仓库的** `evaluation.metrics` 计算指标，
-并对照冻结重放记录逐臂校验（`results/reproduction_check.csv`）：
-
-| 臂 | 本仓库 | 冻结重放 | 绝对差 | 判定 |
-|---|---:|---:|---:|---|
-| QACD LM-only | 0.798942 | 0.798943 | 1.0e-06 | **复现** |
-| QACD LM + instrument | 0.834558 | 0.834559 | 1.0e-06 | **复现** |
-| QACD LM + instrument + MVR | 0.849625 | 0.849529 | 9.7e-05 | 近似 |
-| QACD LM + MVR | 0.835571 | 0.834934 | 6.4e-04 | 近似 |
-
-主张级两臂复现到**浮点噪声**；MVR 两臂差 1e-4~1e-3，因为冻结流水线的响应级融合头
-拟合细节略有不同。三个公开基线数值**完全吻合**，反证了图像级聚合规则正确。
-
-证据包 `artifacts/evidence_bundle.npz`（852 KB）是**打分阶段的输入**（缓存的模型证据），
-由 `tools/export_bundle.py` 在服务器上生成；该脚本 import 冻结协议的装配函数以保证
-特征构造逐位一致，且不做任何模型推理。包内**不含拟合参数**——校准器由本仓库现场拟合。
-完整哈希链路记录在 `results/manifest.json`。
 
 ## 方法一览
 
@@ -210,12 +127,8 @@ artifacts/raw/*.csv.gz     原始证据表（缓存的模型读数）
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 176 项测试，全部离线
+python -m pytest -q                  # 162 passed + 14 skipped（跳过项需实验数据）
 python scripts/demo_offline.py       # 端到端离线演示（合成开发集）
-python scripts/run_frozen_evaluation.py --from-raw --out results   # 复现冻结结果
-python scripts/verify_feature_port.py         # 112 维特征逐元素对齐
-python scripts/verify_decomposition_v1.py     # v1 分解复现冻结 claim table
-python scripts/verify_pipeline_frozen.py      # QACDPipeline 端到端闭环
 qacd demo                            # 同上的 CLI 版本
 
 # 用你自己的开发集拟合打分器（dev.jsonl: question/answer/image/failed/group）
@@ -245,11 +158,11 @@ qacd serve --scorer scorer.json --port 8080
 
 | 组件 | 状态 |
 |---|---|
-| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，176 项测试覆盖 |
-| **特征层 `frozen/`（112 维冻结特征工程）** | **完整，逐元素对齐冻结矩阵（diff = 0）** |
-| **分解 v1（`qacd/decompose_v1.py`）** | **完整，11 个字段 100% 复现冻结 claim table** |
+| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，162 项离线测试覆盖 |
+| 特征层 `frozen/`（112 维冻结特征工程） | 完整；逐元素对齐检查在数据到位后可运行 |
+| 分解 v1（`qacd/decompose_v1.py`） | 完整；冻结 claim table 复现检查同上 |
 | 分解 v2（`qacd/decompose.py`） | 完整，仓库默认；**不是**产出报告数值的版本 |
-| 评估层（证据包校验 / 指标 / 配对 bootstrap） | 完整，**复现冻结结果** |
+| 评估层（证据包校验 / 指标 / 配对 bootstrap） | 完整 |
 | `qacd/features.py`（48 维轻量参考路径） | 仅供离线演示，**不是**产出报告数值的特征集 |
 | `MockProvider`（离线确定性桩） | 完整，用于链路自测 |
 | `RapidOCRProvider` | 完整，需 `rapidocr-onnxruntime` |
@@ -258,7 +171,6 @@ qacd serve --scorer scorer.json --port 8080
 
 **本仓库尚未验证的一件事**：用真实 LLaVA-1.5-13B 权重把评分链路端到端跑一遍。
 `LLaVAProvider` 的代码是完整的，但开发环境没有 GPU 与权重，因此那一次真实推理尚未发生。
-复现实验走的是缓存证据路径（见上），它验证的是**打分阶段**，不是**证据生成阶段**。
 
 ## 文档
 
@@ -269,7 +181,6 @@ qacd serve --scorer scorer.json --port 8080
 | [03-部署与资源需求](docs/03-部署与资源需求.md) | 依赖、显存、调用次数、开发集规模、部署步骤 |
 | [04-平台对接说明](docs/04-平台对接说明.md) | 对接边界、验收标准、监控与 FAQ |
 | [05-课题一技术对接表](docs/05-课题一技术对接表.md) | 技术统计表（Word 版镜像） |
-| [results/](results/README.md) | 冻结实验数值与溯源 |
 
 ## 项目结构
 
@@ -288,15 +199,13 @@ QACD/
 │   ├── providers.py       证据提供方（Mock / RapidOCR / LLaVA）
 │   ├── service.py         HTTP 服务
 │   └── cli.py             命令行入口
-├── frozen/                冻结特征工程：112 维，逐元素对齐验证通过
+├── frozen/                冻结特征工程（112 维）
 ├── evaluation/            评估层：证据包校验、指标、配对 bootstrap
-├── artifacts/             证据包 + artifacts/raw/（原始证据表，0.9 MB）
 ├── tools/                 服务器侧导出脚本（证据包 / 原始证据表）
 ├── configs/               参考配置与接口 schema
 ├── docs/                  方法、接口、部署、对接说明
-├── results/               本仓库跑出的结果 + reported/（研究侧产出）
-├── scripts/               离线演示 + 冻结结果复现
-└── tests/                 176 项测试
+├── scripts/               离线演示 + 数据到齐后的验证脚本
+└── tests/                 176 项测试（162 离线 + 14 需数据）
 ```
 
 ## 引用

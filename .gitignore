@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -43,3 +43,8 @@ runs/
 logs/
 *.log
 tmp/
+# Experimental data — a project deliverable, deliberately not published here.
+# Regenerate with tools/export_raw_evidence.py and tools/export_bundle.py when
+# running the verification scripts.
+artifacts/
+results/

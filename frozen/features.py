@@ -15,9 +15,9 @@ the frozen calibrator consumes:
 Fidelity
 --------
 Every function body below is transcribed from the research modules named in
-:mod:`frozen.constants`; :func:`verify_against_bundle` in
-``scripts/verify_feature_port.py`` checks the result element-wise against the
-feature matrix recorded in ``artifacts/evidence_bundle.npz``.
+:mod:`frozen.constants`. ``scripts/verify_feature_port.py`` checks the result
+element-wise against the frozen feature matrix once the experimental data has
+been exported (see ``evaluation/data.py``); this repository ships without it.
 
 The only deliberate deviation: the research pipeline had **two different**
 helpers both named ``_num``, in different modules.

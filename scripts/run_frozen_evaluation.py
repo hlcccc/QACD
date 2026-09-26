@@ -109,6 +109,12 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     verbose = not args.quiet
 
+    from evaluation.data import require_data
+
+    absent = require_data([args.bundle], "run the frozen evaluation")
+    if absent is not None:
+        return absent
+
     bundle = load_bundle(args.bundle, args.manifest, verify=not args.no_verify)
     print("=" * 78)
     print("QACD frozen evaluation — scoring by this repository's code")

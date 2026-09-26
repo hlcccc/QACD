@@ -7,9 +7,9 @@ abstract: >-
   atomic claims, collects belief-consistency, direct-verification, alignment and
   mechanical-OCR evidence, calibrates a regularised logistic risk map, and
   aggregates claim risks into an answer-level score with a maximum operator.
-  On a frozen TextVQA test split of 1,999 responses over 1,278 unseen images the
-  full pipeline reaches 0.8526 response-level AUROC, statistically at parity with
-  the white-box UMPIRE K=5 baseline (delta AUROC -0.0039, 95% CI [-0.0195, +0.0124]).
+  The pipeline is evaluated on a frozen TextVQA test split of 1,999 responses
+  over 1,278 unseen images. Numerical results are a project deliverable and are
+  not published in this repository.
 version: 1.0.0
 date-released: "2026-09-24"
 license: LicenseRef-Proprietary

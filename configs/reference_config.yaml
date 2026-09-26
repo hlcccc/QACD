@@ -2,7 +2,7 @@
 #
 # 这是平台对接所使用的默认配置。字段含义见 docs/02-接口文档.md。
 # 注意：本文件不包含拟合后的系数。冻结打分器需要从开发集用 `qacd fit` 重新拟合，
-# 或由研究流水线导出（见 results/README.md）。
+# 或由研究流水线导出（见 tools/export_bundle.py）。
 
 version: "1.0.0"
 
@@ -35,6 +35,4 @@ feature_families:
 research_reference:
   lm_channel_features: 95
   mechanical_family_features: 28
-  frozen_reference_auroc: 0.8526
-  frozen_reference_brier: 0.1529
-  note: "LM 95 维 + 机械 28 维 + MVR 7 维，图像级配对 bootstrap 5000 次"
+  note: "LM 95 维 + 机械 28 维 + MVR 7 维；结果数值见项目交付文档"
