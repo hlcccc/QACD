@@ -28,7 +28,7 @@ single integration-ready project.
     `RapidOCRProvider` and a `LLaVAProvider` adapter.
   - `service.py` — FastAPI service exposing the four integration endpoints.
   - `cli.py` — `score`, `demo`, `fit`, `serve`, `version`.
-- **Tests** — 150 tests covering decomposition, mechanical/MVR features,
+- **Tests** — 176 tests covering decomposition, mechanical/MVR features,
   calibration correctness and determinism, aggregation, conformal selection,
   pipeline fitting, scorer round-trip and the response payload contract.
 - **Documentation** (Chinese, with an English README) — method, interface

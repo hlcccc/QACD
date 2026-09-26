@@ -21,7 +21,7 @@ numpy>=1.23
 # Reproducing the frozen results from the evidence bundle: NumPy only, no extra.
 #
 # Testing:
-#   pip install pytest                              # 114 of the 150 tests, no extras
+#   pip install pytest                              # 114 of the 176 tests, no extras
 #   pip install pytest "fastapi>=0.110" "pydantic>=2.0" httpx
-#                                                   # all 150, incl. the HTTP service layer
+#                                                   # all 176, incl. the HTTP service layer
 #                                                   # (httpx is required by fastapi's TestClient)

@@ -88,6 +88,7 @@ class QACDPipeline:
         config: Optional[QACDConfig] = None,
         calibrator: Optional[BICLiteCalibrator] = None,
         fusion: Optional[RidgeLogistic] = None,
+        assembler: Any = None,
     ):
         self.provider = provider if provider is not None else MockProvider()
         self.config = config or QACDConfig()
@@ -96,6 +97,13 @@ class QACDPipeline:
         self.feature_names = list(self.config.feature_names)
         self.fitted_ = bool(calibrator is not None and getattr(calibrator, "coef_", None) is not None)
         self.fusion_fitted_ = bool(fusion is not None and getattr(fusion, "coef_", None) is not None)
+        #: Optional :class:`frozen.assemble.FrozenFeatureAssembler`. When set, the
+        #: pipeline builds the frozen 112-column vector instead of the 48-column
+        #: reference subset, so it scores on the feature set behind the reported
+        #: results.
+        self.assembler = None
+        if assembler is not None:
+            self.attach_frozen_features(assembler)
 
     # ------------------------------------------------------------------
     # Inference
@@ -298,6 +306,81 @@ class QACDPipeline:
                 f"feature_dim={X.shape[1]}, calibrator_converged={self.fitted_}"
             )
         return self
+
+    # ------------------------------------------------------------------
+    # Frozen feature set
+    # ------------------------------------------------------------------
+    def attach_frozen_features(self, assembler: Any) -> "QACDPipeline":
+        """Switch this pipeline to the frozen 112-column feature set.
+
+        The reference :mod:`qacd.features` path is a 48-column subset used for
+        offline demos; the frozen set is what the reported results sit on. After
+        attaching, ``feature_names`` matches the assembler's order, so a
+        calibrator fitted on the frozen matrix lines up.
+        """
+        names = list(getattr(assembler, "feature_names", []))
+        if not names:
+            raise ValueError("assembler exposes no feature_names")
+        self.assembler = assembler
+        self.feature_names = names
+        self.config.feature_names = list(names)
+        return self
+
+    def fit_matrix(self, matrix, labels, train_mask) -> "QACDPipeline":
+        """Fit the claim calibrator on a prebuilt feature matrix.
+
+        Used with the frozen assembler, where the features come from evidence
+        tables rather than from a per-request provider.
+        """
+        import numpy as np
+
+        matrix = np.asarray(matrix, dtype=np.float64)
+        labels = np.asarray(labels).reshape(-1)
+        train_mask = np.asarray(train_mask, dtype=bool)
+        if matrix.shape[1] != len(self.feature_names):
+            raise ValueError(
+                f"matrix has {matrix.shape[1]} columns but the pipeline expects "
+                f"{len(self.feature_names)}"
+            )
+        if not (matrix.shape[0] == labels.shape[0] == train_mask.shape[0]):
+            raise ValueError("matrix, labels and train_mask disagree on row count")
+        self.calibrator = BICLiteCalibrator(l2=self.config.l2).fit(matrix[train_mask], labels[train_mask])
+        self.fitted_ = bool(self.calibrator.success_)
+        return self
+
+    def score_evidence_frame(self, frame):
+        """Claim-level risk for a table of raw evidence rows.
+
+        Builds the frozen feature vector per claim with the attached assembler and
+        applies the fitted calibrator. Returns one risk per row, in row order.
+        """
+        if self.assembler is None:
+            raise ValueError(
+                "no feature assembler attached; construct with assembler=... or call "
+                "attach_frozen_features() first"
+            )
+        if not self.fitted_:
+            raise ValueError("calibrator is not fitted; call fit_matrix() first")
+        matrix = self.assembler.transform_frame(frame)
+        if matrix.shape[1] != len(self.feature_names):
+            raise ValueError(
+                f"assembled {matrix.shape[1]} features but the calibrator expects "
+                f"{len(self.feature_names)}"
+            )
+        return self.calibrator.predict_proba(matrix)
+
+    def score_evidence_frame_by_row(self, frame):
+        """Same as :meth:`score_evidence_frame`, assembled one claim at a time.
+
+        Provided to demonstrate that the frozen feature set is genuinely
+        per-claim: assembling row by row gives identical features.
+        """
+        if self.assembler is None:
+            raise ValueError("no feature assembler attached")
+        if not self.fitted_:
+            raise ValueError("calibrator is not fitted; call fit_matrix() first")
+        matrix = self.assembler.transform_rows(frame.to_dict("records"))
+        return self.calibrator.predict_proba(matrix)
 
     # ------------------------------------------------------------------
     # Persistence

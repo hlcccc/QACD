@@ -2,7 +2,7 @@
 
 **面向 LVLM 视觉问答的回答级错误风险后处理评分**
 
-[![tests](https://img.shields.io/badge/tests-150%20passed-brightgreen)](#快速开始)
+[![tests](https://img.shields.io/badge/tests-176%20passed-brightgreen)](#快速开始)
 [![python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-proprietary-lightgrey)](NOTICE.md)
 
@@ -91,6 +91,64 @@ imputer medians max|diff| = 0.000e+00
 > `[0,1]`。合并到同一模块后必须分开，本仓库保存为 `_num_bew` / `_num_dvb`，
 > `tests/test_frozen_features.py` 有专门测试锁住这个区别。
 
+## 分解版本：结果是 v1，代码默认是 v2
+
+冻结 claim table 里每一行的 `decomposition_method` 都是 **v1**：
+
+| 表 | `rule_fallback_qacd_v1` | `llm_qacd_v1_checked` | v2 |
+|---|---:|---:|---:|
+| 测试（1999 回答 / 2020 claim） | 1330 | 690 | **0** |
+| 开发（3000 回答 / 3025 claim） | 1971 | 1054 | **0** |
+
+提交 `f03b27a`（"Upgrade QACD to validated multi-claim decomposition"）把分解升级到了 v2，
+而 `qacd/decompose.py` 实现的是 v2。两者不只是标签不同：
+
+| | v1（产出结果的版本） | v2（当前默认） |
+|---|---|---|
+| 回退切分 | 仅句子 / 小句 | 增加二级小句、逗号、22 词分块、去重 |
+| 类型判定 | 用 `question + 条件化 claim`，数字优先 | 用 source span，claim 优先 |
+| `is_atomic` 阈值 | 0.75 | 0.9 |
+| 引号问句 | 计入长度惩罚 | 剥离后再算 |
+| claim 集合校验 | 无 | 覆盖率 / 原子性 / 重复校验 |
+
+**两个版本都在仓库里**：`qacd/decompose.py`（v2，默认）与 `qacd/decompose_v1.py`（v1，冻结版）。
+
+v1 复现已验证（`scripts/verify_decomposition_v1.py`）—— 用 v1 重新推导冻结表里每一条回退
+claim，11 个字段**全部 100% 一致**：
+
+```
+dev   1971 条 claim, claim_text / claim_type / source_span / atomicity_score ... 均 100%
+test  1330 条 claim, 同上
+claim 数不匹配: 0     混合路径: 0
+```
+
+所以仓库现在能明确指出：`results/` 里的数值来自 **v1 分解 + 112 维冻结特征**。
+
+## 端到端：QACDPipeline 直接用冻结特征打分
+
+`QACDPipeline` 默认走 48 维参考路径；挂上装配器后走 112 维冻结特征：
+
+```python
+from frozen.assemble import FrozenFeatureAssembler
+from qacd.pipeline import QACDPipeline
+
+pipeline = QACDPipeline(assembler=FrozenFeatureAssembler.from_matrices(matrices))
+pipeline.fit_matrix(matrices.dev_matrix, labels, matrices.train_mask)
+claim_risk = pipeline.score_evidence_frame(test_frame)   # 每条 claim 一个风险分
+```
+
+`scripts/verify_pipeline_frozen.py` 验证这条链：
+
+```
+[OK] dev  assembler vs frozen max|diff| = 0.000e+00
+[OK] test assembler vs frozen max|diff| = 0.000e+00
+[OK] 逐行装配 vs 整表            max|diff| = 0.000e+00
+     response AUROC = 0.834558   vs 冻结重放 0.834559  (diff 1.03e-06)
+```
+
+派生规则全部逐行，所以单条 claim 也能独立装配 —— 这正是冻结特征集能用于在线打分
+而不只是批处理的原因。
+
 ## 结果由本仓库代码跑出
 
 `results/` 里的主表不是转录的研究数值，而是这条命令的输出：
@@ -152,10 +210,12 @@ artifacts/raw/*.csv.gz     原始证据表（缓存的模型读数）
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 150 项测试，全部离线
+python -m pytest -q                  # 176 项测试，全部离线
 python scripts/demo_offline.py       # 端到端离线演示（合成开发集）
-python scripts/run_frozen_evaluation.py \
-    --bundle artifacts/evidence_bundle.npz --out results   # 复现冻结结果
+python scripts/run_frozen_evaluation.py --from-raw --out results   # 复现冻结结果
+python scripts/verify_feature_port.py         # 112 维特征逐元素对齐
+python scripts/verify_decomposition_v1.py     # v1 分解复现冻结 claim table
+python scripts/verify_pipeline_frozen.py      # QACDPipeline 端到端闭环
 qacd demo                            # 同上的 CLI 版本
 
 # 用你自己的开发集拟合打分器（dev.jsonl: question/answer/image/failed/group）
@@ -185,8 +245,10 @@ qacd serve --scorer scorer.json --port 8080
 
 | 组件 | 状态 |
 |---|---|
-| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，150 项测试覆盖 |
+| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，176 项测试覆盖 |
 | **特征层 `frozen/`（112 维冻结特征工程）** | **完整，逐元素对齐冻结矩阵（diff = 0）** |
+| **分解 v1（`qacd/decompose_v1.py`）** | **完整，11 个字段 100% 复现冻结 claim table** |
+| 分解 v2（`qacd/decompose.py`） | 完整，仓库默认；**不是**产出报告数值的版本 |
 | 评估层（证据包校验 / 指标 / 配对 bootstrap） | 完整，**复现冻结结果** |
 | `qacd/features.py`（48 维轻量参考路径） | 仅供离线演示，**不是**产出报告数值的特征集 |
 | `MockProvider`（离线确定性桩） | 完整，用于链路自测 |
@@ -234,7 +296,7 @@ QACD/
 ├── docs/                  方法、接口、部署、对接说明
 ├── results/               本仓库跑出的结果 + reported/（研究侧产出）
 ├── scripts/               离线演示 + 冻结结果复现
-└── tests/                 150 项测试
+└── tests/                 176 项测试
 ```
 
 ## 引用
