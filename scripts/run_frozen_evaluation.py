@@ -96,6 +96,13 @@ def main() -> int:
     parser.add_argument("--out", default="results")
     parser.add_argument("--no-verify", action="store_true", help="skip the bundle SHA256 check")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--from-raw",
+        action="store_true",
+        help="rebuild the feature matrices from the raw evidence tables using frozen/ "
+             "instead of reading them from the bundle, and check the two agree",
+    )
+    parser.add_argument("--raw", default="artifacts/raw", help="raw evidence table directory")
     args = parser.parse_args()
 
     out_dir = Path(args.out)
@@ -110,6 +117,46 @@ def main() -> int:
     print(f"  test responses {len(bundle['test_response_y'])} | "
           f"failures {int(bundle['test_response_y'].sum())} | "
           f"images {len(set(map(str, bundle['test_response_images'])))}")
+
+    built = None
+    if args.from_raw:
+        # Rebuild the feature matrices from the raw evidence tables with this
+        # repository's own ported feature engineering, then substitute them in.
+        # Everything downstream - calibration, aggregation, metrics - then runs
+        # on features this repository produced, not on exported ones.
+        from frozen.build import build_matrices, claim_images, load_split
+
+        print()
+        print("[0/4] rebuilding features from raw evidence with frozen/ ...")
+        raw_dir = Path(args.raw)
+        dev_frame = load_split(raw_dir, "dev")
+        test_frame = load_split(raw_dir, "test")
+        built = build_matrices(
+            dev_frame, test_frame, claim_images(dev_frame, raw_dir / "dev_claims.csv.gz")
+        )
+        print(
+            f"      built {built.dev_matrix.shape} (dev) / {built.test_matrix.shape} (test), "
+            f"{built.n_features} features"
+        )
+
+        reference_names = bundle.lm_names + bundle.mechanical_names
+        if built.names != reference_names:
+            raise SystemExit(
+                "feature name/order mismatch between the ported code and the bundle"
+            )
+        for split, mine, theirs in (
+            ("dev", built.dev_matrix, bundle["dev_matrix"]),
+            ("test", built.test_matrix, bundle["test_matrix"]),
+        ):
+            if mine.shape != theirs.shape:
+                raise SystemExit(f"{split} shape mismatch: {mine.shape} vs {theirs.shape}")
+            diff = float(np.max(np.abs(mine - theirs)))
+            verdict = "OK  " if diff <= 1e-12 else "FAIL"
+            print(f"      [{verdict}] {split} rebuilt vs exported max|diff| = {diff:.3e}")
+            if diff > 1e-12:
+                raise SystemExit(f"{split} rebuilt features diverge from the frozen matrix")
+        bundle.arrays["dev_matrix"] = built.dev_matrix
+        bundle.arrays["test_matrix"] = built.test_matrix
 
     lm_columns = bundle.select(bundle.lm_names)
     all_columns = bundle.select(bundle.feature_names)
@@ -252,6 +299,11 @@ def main() -> int:
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "produced_by": "scripts/run_frozen_evaluation.py",
         "produced_by_sha256": sha256_file(Path(__file__)),
+        "features_built_from": (
+            "frozen/ (this repository) over artifacts/raw"
+            if built is not None
+            else "artifacts/evidence_bundle.npz (exported from the research host)"
+        ),
         "bundle": {
             "path": str(bundle.path),
             "sha256": bundle.manifest.get("bundle_sha256"),

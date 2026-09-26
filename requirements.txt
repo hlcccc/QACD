@@ -1,4 +1,4 @@
-# QACD core runtime — deliberately minimal.
+﻿# QACD core runtime — deliberately minimal.
 # The decision layer (decomposition parsing, feature assembly, BIC-lite
 # calibration, MVR statistics, response aggregation, conformal selection) and
 # the evaluation layer are implemented with NumPy only, so the package installs
@@ -15,10 +15,13 @@ numpy>=1.23
 # Real LVLM evidence provider (qacd.providers.LLaVAProvider):
 #   pip install "torch>=2.1" "transformers>=4.40" accelerate pillow
 #
+# Frozen feature engineering (frozen/) and the raw-evidence reproduction path:
+#   pip install "pandas>=1.5"
+#
 # Reproducing the frozen results from the evidence bundle: NumPy only, no extra.
 #
 # Testing:
-#   pip install pytest                              # 114 of the 128 tests, no extras
+#   pip install pytest                              # 114 of the 150 tests, no extras
 #   pip install pytest "fastapi>=0.110" "pydantic>=2.0" httpx
-#                                                   # all 128, incl. the HTTP service layer
+#                                                   # all 150, incl. the HTTP service layer
 #                                                   # (httpx is required by fastapi's TestClient)

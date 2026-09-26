@@ -25,18 +25,24 @@ classifiers = [
 dependencies = ["numpy>=1.23"]
 
 [project.optional-dependencies]
+# Frozen feature engineering (frozen/) and the raw-evidence reproduction path.
+frozen = ["pandas>=1.5"]
 service = ["fastapi>=0.110", "uvicorn>=0.27", "pydantic>=2.0"]
 ocr = ["rapidocr-onnxruntime"]
 llava = ["torch>=2.1", "transformers>=4.40", "accelerate", "pillow"]
-research = ["scikit-learn", "pandas", "scipy", "matplotlib"]
-test = ["pytest>=7.0"]
+test = ["pytest>=7.0", "pandas>=1.5", "fastapi>=0.110", "pydantic>=2.0", "httpx"]
 
 [project.scripts]
 qacd = "qacd.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["qacd*"]
+include = ["qacd*", "evaluation*", "frozen*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+  # The ported research feature engineering inserts columns one at a time,
+  # which pandas reports as fragmentation. Behaviour is unaffected.
+  "ignore:DataFrame is highly fragmented",
+]

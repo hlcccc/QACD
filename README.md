@@ -2,7 +2,7 @@
 
 **面向 LVLM 视觉问答的回答级错误风险后处理评分**
 
-[![tests](https://img.shields.io/badge/tests-128%20passed-brightgreen)](#快速开始)
+[![tests](https://img.shields.io/badge/tests-150%20passed-brightgreen)](#快速开始)
 [![python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-proprietary-lightgrey)](NOTICE.md)
 
@@ -64,12 +64,50 @@ QACD offline demo
 评估设置：冻结 TextVQA 测试集（1,999 条回答 / 1,278 张开发未见图像 / 836 条失败），
 配对图像级 bootstrap 5,000 次，随机种子固定。全部校准器仅用开发集拟合。
 
+## 特征工程也在仓库里
+
+`frozen/` 是研究流水线特征工程的逐行移植（原先只有数据、没有代码）：
+
+```
+frozen/constants.py   特征族名称表（逐字转录，顺序即冻结系数所绑定顺序）
+frozen/features.py    派生规则：方向对齐 → 矛盾感知 v2 → QACD 感知 → 直接验证器
+frozen/build.py       划分、特征选择、中位数填补、矩阵装配
+```
+
+移植结果**逐元素对齐**（`scripts/verify_feature_port.py`）：
+
+```
+dev   max|diff| = 0.000e+00
+test  max|diff| = 0.000e+00
+imputer medians max|diff| = 0.000e+00
+```
+
+也就是说，把原始证据表喂给仓库代码，得到的 3025×112 / 2020×112 特征矩阵与
+冻结时**逐位相同**。这是让"从原始证据到风险分"这条端到端链路真正闭合的一步。
+
+> 移植中唯一的有意偏离：研究代码里有两个**同名但行为不同**的 `_num` ——
+> `run_bew_bcm_v2._num` 不填补不截断（`add_contradiction_aware_features` 依赖
+> 它在缺失时返回 NaN），`run_qacd_direct_verifier_benchmark._num` 会填补并截断到
+> `[0,1]`。合并到同一模块后必须分开，本仓库保存为 `_num_bew` / `_num_dvb`，
+> `tests/test_frozen_features.py` 有专门测试锁住这个区别。
+
 ## 结果由本仓库代码跑出
 
 `results/` 里的主表不是转录的研究数值，而是这条命令的输出：
 
 ```bash
-python scripts/run_frozen_evaluation.py --bundle artifacts/evidence_bundle.npz --out results
+# 完整端到端：从原始证据表重建特征，再校准、聚合、算指标
+python scripts/run_frozen_evaluation.py --from-raw --out results
+```
+
+`--from-raw` 让整条链路都跑本仓库的代码：
+
+```
+artifacts/raw/*.csv.gz     原始证据表（缓存的模型读数）
+  └─ frozen/               本仓库移植的特征工程（112 维）
+       └─ qacd.calibrate   本仓库的校准器
+            └─ qacd.aggregate  本仓库的聚合
+                 └─ evaluation.metrics  本仓库的指标
 ```
 
 它用**本仓库的** `BICLiteCalibrator` 拟合主张级校准器、用**本仓库的**
@@ -114,7 +152,7 @@ python scripts/run_frozen_evaluation.py --bundle artifacts/evidence_bundle.npz -
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 128 项测试，全部离线
+python -m pytest -q                  # 150 项测试，全部离线
 python scripts/demo_offline.py       # 端到端离线演示（合成开发集）
 python scripts/run_frozen_evaluation.py \
     --bundle artifacts/evidence_bundle.npz --out results   # 复现冻结结果
@@ -147,8 +185,10 @@ qacd serve --scorer scorer.json --port 8080
 
 | 组件 | 状态 |
 |---|---|
-| 决策层（分解 / 特征 / 校准 / 聚合 / MVR / 保形） | 完整，128 项测试覆盖 |
+| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，150 项测试覆盖 |
+| **特征层 `frozen/`（112 维冻结特征工程）** | **完整，逐元素对齐冻结矩阵（diff = 0）** |
 | 评估层（证据包校验 / 指标 / 配对 bootstrap） | 完整，**复现冻结结果** |
+| `qacd/features.py`（48 维轻量参考路径） | 仅供离线演示，**不是**产出报告数值的特征集 |
 | `MockProvider`（离线确定性桩） | 完整，用于链路自测 |
 | `RapidOCRProvider` | 完整，需 `rapidocr-onnxruntime` |
 | `LLaVAProvider`（LLaVA-1.5-13B 证据提供方） | **完整实现**：四类提示、类型化探针、yes/no 解析、logprob 置信度、K 次采样。模型调用点 `_generate_with_scores` 可注入，整套逻辑在 `tests/test_provider.py` 中无权重跑通 |
@@ -186,14 +226,15 @@ QACD/
 │   ├── providers.py       证据提供方（Mock / RapidOCR / LLaVA）
 │   ├── service.py         HTTP 服务
 │   └── cli.py             命令行入口
+├── frozen/                冻结特征工程：112 维，逐元素对齐验证通过
 ├── evaluation/            评估层：证据包校验、指标、配对 bootstrap
-├── artifacts/             证据包（打分阶段输入，852 KB，含 SHA256 清单）
-├── tools/                 服务器侧证据包导出脚本
+├── artifacts/             证据包 + artifacts/raw/（原始证据表，0.9 MB）
+├── tools/                 服务器侧导出脚本（证据包 / 原始证据表）
 ├── configs/               参考配置与接口 schema
 ├── docs/                  方法、接口、部署、对接说明
 ├── results/               本仓库跑出的结果 + reported/（研究侧产出）
 ├── scripts/               离线演示 + 冻结结果复现
-└── tests/                 128 项测试
+└── tests/                 150 项测试
 ```
 
 ## 引用
