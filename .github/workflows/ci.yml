@@ -38,6 +38,13 @@ jobs:
       - name: Offline demo
         run: python scripts/demo_offline.py
 
+      # Drives the real LLaVAProvider code path with a stub model: prompt
+      # construction, parsing, view routing and the verification probes. No
+      # checkpoint, no GPU. This is the only step that exercises the provider an
+      # integrator will actually deploy.
+      - name: Provider smoke test (stub model)
+        run: python examples/smoke_test_stub_model.py
+
       # The README tells readers to run `qacd ...`. If packaging ever stops
       # creating that entry point, this is the only step that notices.
       - name: Console script exists and runs

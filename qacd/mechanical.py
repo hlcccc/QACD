@@ -213,6 +213,16 @@ def mvr_features(sampled_answers: Sequence[str], ocr_texts: Sequence[str], k: in
         Number of samples to use. Defaults to all provided. ``k`` is exposed to
         the platform because it is the cost/accuracy dial: the research pipeline
         reports K = 1, 2, 3, 5 with K = 5 best and K = 3 the knee.
+
+    Notes
+    -----
+    ``ocr_texts`` is load-bearing, not incidental. Support for a resample is
+    decided by comparing it against the text read off the image, so empty
+    ``ocr_texts`` means nothing can match: every sample scores as unsupported and
+    all seven columns come out constant, whatever the samples actually said. A
+    deployment that enables MVR without the OCR channel pays for K generations
+    and gets a signal-free channel for it. ``QACDPipeline.fit`` detects that case
+    and refuses to fit the fusion head rather than fitting it on noise.
     """
     selected = list(sampled_answers)[: (k if k is not None else len(sampled_answers))]
     ocr_norm = [normalize_text(t) for t in (ocr_texts or [])]

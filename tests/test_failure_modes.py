@@ -351,3 +351,38 @@ def test_an_empty_development_set_is_rejected(tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         main(["fit", "--data", str(path), "--out", "s.json", "--provider", "mock"])
     assert "no records" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# 6. MVR depends on OCR, and that must not be a silent dead channel
+# ---------------------------------------------------------------------------
+
+def test_mvr_is_degenerate_without_ocr_text():
+    """The coupling that makes `--k 3` without OCR a waste of generations.
+
+    Documents the mechanism the fusion guard is reacting to: support for a
+    resample is decided by comparing it against the OCR text, so with no OCR
+    every sample is unsupported no matter what it says.
+    """
+    from qacd.mechanical import MVR_FEATURES, mvr_features
+
+    samples = ["Flickr", "Flickr", "Pinterest"]
+    without = mvr_features(samples, [], k=3)
+    with_ocr = mvr_features(samples, ["Flickr"], k=3)
+
+    assert without["mvr_unsupported_rate"] == 1.0
+    assert without["mvr_fuzzy_mean"] == 0.0
+    assert len({without[name] for name in MVR_FEATURES}) == 2, "expected a constant channel"
+
+    assert with_ocr["mvr_unsupported_rate"] < 1.0
+    assert with_ocr["mvr_fuzzy_std"] > 0.0, "with OCR the channel carries spread"
+
+
+def test_ocr_less_deployment_is_caught_at_fit_time():
+    """The pipeline must not silently fit a head on a dead MVR channel."""
+    pipeline = QACDPipeline(
+        provider=MockProvider(image_text="", sampled_pool=[]), config=QACDConfig(k=3)
+    )
+    pipeline.fit(_inverting_dev_set())
+    assert not pipeline.fusion_fitted_
+    assert any("no signal" in w or "constant" in w for w in pipeline.fit_warnings)

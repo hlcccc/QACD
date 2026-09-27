@@ -524,7 +524,7 @@ def main() -> int:
     add_heading(document, "附：代码与文档入口")
     add_body(
         document,
-        f"代码仓库：{REPO}　（含中英双语文档、可运行的参考实现、193 项离线测试与接口文档）",
+        f"代码仓库：{REPO}　（含中英双语文档、可运行的参考实现、195 项离线测试与接口文档）",
     )
     add_bullets(
         document,

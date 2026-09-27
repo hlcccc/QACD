@@ -83,7 +83,7 @@ Without the data those scripts exit with status **2** and name the missing input
 they never pass silently on empty input. 15 tests report as `skipped` in the
 documented quick-start environment (`pytest -rs` prints why): 14 need the data and
 1 checks the integration-table generator, which needs `python-docx`. The other
-**174** need nothing.
+**195** need nothing.
 
 ## Pipeline
 
@@ -114,12 +114,26 @@ pip install -e ".[test]"
 > for embedding QACD in your own code; use `python -m qacd.cli` in place of `qacd`.
 
 ```bash
-python -m pytest -q                  # 193 passed + 15 skipped (14 need data, 1 needs python-docx)
+python -m pytest -q                  # 195 passed + 15 skipped (14 need data, 1 needs python-docx)
 python scripts/demo_offline.py       # end-to-end demo on a synthetic dev set
 qacd demo
 ```
 
 That step needs no model and no GPU; it verifies the install and the plumbing.
+But it uses `MockProvider` and therefore executes **no `LLaVAProvider` code at
+all** — so it cannot tell you whether your wiring is right.
+
+To check the real provider path before downloading 26 GB of weights:
+
+```bash
+python examples/smoke_test_stub_model.py
+```
+
+A deterministic stub drives the **real** `LLaVAProvider` — prompt construction,
+answer parsing, view routing and the type-routed verification probes all execute
+— and smoke-tests all five endpoints. It proves the wiring; it does **not** prove
+the method, because the stub's answers are canned.
+
 To get a score that **means** anything you have to attach a real evidence
 provider:
 
@@ -174,7 +188,7 @@ which is a record-keeping placeholder rather than missing functionality.)
 
 | Component | State |
 |---|---|
-| Decision layer `qacd/` (NumPy-only) | complete, 193 offline tests |
+| Decision layer `qacd/` (NumPy-only) | complete, 195 offline tests |
 | Frozen feature layer `frozen/` (112 columns) | complete; element-wise alignment check runs once data is present |
 | Decomposition v1 (`qacd/decompose_v1.py`) | complete; frozen claim-table reproduction check likewise |
 | Decomposition v2 (`qacd/decompose.py`) | complete, repository default; **not** the version behind the reported numbers |
@@ -276,7 +290,7 @@ QACD/
 ├── configs/               reference configuration and interface schema
 ├── docs/                  method, interface, deployment, integration notes
 ├── scripts/               offline demo + verification scripts for when data lands
-└── tests/                 208 tests (193 offline + 15 needing data or an extra dep)
+└── tests/                 210 tests (195 offline + 15 needing data or an extra dep)
 ```
 
 ## Citation
