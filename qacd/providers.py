@@ -599,7 +599,24 @@ class LLaVAProvider:
     def direct_verification(
         self, question: str, answer: str, claim_text: str, claim_type: str, image: str = ""
     ) -> DirectVerification:
-        """Type-routed direct probe plus OCR and numeric sub-probes."""
+        """Type-routed direct probe plus OCR and numeric sub-probes.
+
+        .. warning::
+           **The plain yes/no probe is heavily biased towards "Yes".** On a
+           real-weight check it answered "Yes" for every sample, including one
+           whose answer was "None" and whose own free-generation views said the
+           opposite. This reproduces the failure the research pipeline
+           diagnosed: the frozen verifier calls ~94% of responses "supported"
+           and its residual signal comes from the evidence string it writes,
+           not from the verdict.
+
+           The research tried three elicitation variants and concluded that
+           elicitation is not the bottleneck. Treat ``support`` from this probe
+           as a weak feature, not as a judgement - which is exactly how the
+           frozen feature set uses it (``direct_verifier_*`` feeds a calibrator
+           together with the contradiction and evidence-coverage terms, never
+           on its own).
+        """
         direct_text, direct_confidence = self._generate_with_scores(
             image, self.build_direct_prompt(claim_text, claim_type), False
         )

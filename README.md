@@ -181,12 +181,23 @@ qacd serve --scorer scorer.json --port 8080
 | `_generate_with_scores` | `'A television is on a white shelf with a bunch of toys and books.'` conf=0.496 |
 | `decompose` | 1 条受检主张：`{'claim_text': 'The website hosting this photo is Flickr.', 'source_span': 'Flickr'}` |
 | `belief_views` | 4 个视图：independent/visual/minus_claim 均答 `'Pinterest'`（与冻结答案不一致 —— 信念信号按设计工作），answer_match=`'Yes'` |
-| `direct_verification` | support=1.000，contradiction=0.000，evidence=`'Yes'` |
-| `sample_answers(k=3)` | `['Flickr', 'Flickr', 'Flickr']` |
+| `direct_verification` | support=1.000，contradiction=0.000，evidence=`'Yes'` —— **见下方注意** |
+| `sample_answers(k=3)` | `['Flickr', 'Flickr', 'Flickr']`（该次运行的采样设置尚未修正，见下） |
 | `QACDPipeline.score()` | `risk_score=0.5000`，`model_calls=5`，`latency_ms=3755` |
 
 23 次模型调用，峰值显存 27.74 GB。评分器未拟合，因此 `risk_score` 是未校准先验
 （`warnings` 中已如实标注）。
+
+> **关于 `sample_answers`**：上表那次运行发生在采样播种修正**之前**。当时
+> `torch.manual_seed` 在每次生成前都被调用，K 次采样完全相同，MVR 通道没有信号。
+> 修正后重跑（3 条样本）得到 distinct=2 与 distinct=3，采样恢复多样性。
+
+> **关于 `direct_verification`**：朴素 yes/no 探针**强烈偏向 "Yes"**。真机上三条样本
+> 全部返回 support=1.000，其中一条答案是 "None"、且模型自己的自由生成视图说
+> "No website"。这与研究侧诊断的"验证器在约 94% 的回答上都说有支持"一致；研究侧
+> 试过三种提问变体，结论是提问方式不是瓶颈。因此该字段是弱特征，冻结特征集也从不
+> 单独使用它（`direct_verifier_*` 与矛盾、证据覆盖项一起送进校准器）。详见
+> `qacd/providers.py` 中 `direct_verification` 的文档。
 
 > 这次验证也抓出一个真 bug：`EvidenceProvider` 的四个方法原本没有 image 参数，
 > `LLaVAProvider` 内部把 `_generate_with_scores("", ...)` 写死成空图，导致所有证据

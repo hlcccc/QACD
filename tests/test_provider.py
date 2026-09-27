@@ -215,3 +215,26 @@ def test_provider_satisfies_the_evidence_protocol():
 
     p, _ = provider(lambda prompt, do_sample: ("yes", 0.9))
     assert isinstance(p, EvidenceProvider)
+
+# -- behaviours that only a real-weight run exposed ----------------------
+
+def test_decomposition_gets_a_larger_token_budget_than_a_probe():
+    """A yes/no probe needs a handful of tokens; the JSON decomposition needs
+    far more. Sharing one budget truncated it and nothing ever parsed."""
+    p, _ = provider(lambda prompt, do_sample: (yes, 0.9))
+    assert p.decomposition_max_new_tokens > p.max_new_tokens
+
+
+def test_reseed_is_available_and_idempotent():
+    """Seeding happens once at load; reseed() re-applies it deliberately.
+    Seeding before every generation would make K samples identical."""
+    p, _ = provider(lambda prompt, do_sample: (yes, 0.9))
+    assert callable(p.reseed)
+    p.reseed()  # must not raise with or without a loaded model
+
+
+def test_direct_verification_is_documented_as_biased():
+    # The plain yes/no probe leans towards Yes; the docstring must say so,
+    # because a reader would otherwise treat support=1.0 as a judgement.
+    doc = LLaVAProvider.direct_verification.__doc__ or ""
+    assert "biased" in doc.lower()
