@@ -67,6 +67,7 @@ def test_risk_endpoint_returns_the_platform_contract():
     for key in (
         "risk_score",
         "is_high_risk",
+        "calibrated_confidence",
         "threshold",
         "num_claims",
         "claims",
@@ -81,6 +82,23 @@ def test_risk_endpoint_returns_the_platform_contract():
     assert 0.0 <= body["risk_score"] <= 1.0
     assert isinstance(body["is_high_risk"], bool)
     assert body["num_claims"] >= 1
+
+
+def test_calibrated_confidence_is_the_complement_of_the_risk_score():
+    """The advertised confidence must track the score it summarises.
+
+    An earlier revision of the integration table promised this field while the
+    service returned no such key at all, so this test pins both its presence and
+    its value.
+    """
+    client = build_client()
+    body = client.post(
+        "/v1/qacd/risk",
+        json={"question": "What brand?", "answer": "Dakota Digital", "image": "x.jpg"},
+    ).json()
+    confidence = body["calibrated_confidence"]
+    assert 0.0 <= confidence <= 1.0
+    assert confidence == pytest.approx(1.0 - body["risk_score"], abs=1e-6)
 
 
 def test_risk_endpoint_separates_correct_from_wrong_answers():

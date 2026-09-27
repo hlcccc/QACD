@@ -67,6 +67,8 @@ if SERVICE_AVAILABLE:
     class RiskResponse(BaseModel):
         risk_score: float
         is_high_risk: bool
+        #: Complement of ``risk_score``; see ``ResponseRisk.calibrated_confidence``.
+        calibrated_confidence: float
         threshold: float
         num_claims: int
         claims: List[ClaimOut] = []

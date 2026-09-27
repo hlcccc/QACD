@@ -21,7 +21,7 @@ result = pipeline.score(
     answer="Dakota digital",
     image="demo.jpg",
 )
-print(result.risk_score, result.is_high_risk, result.num_claims)
+print(result.risk_score, result.calibrated_confidence, result.is_high_risk, result.num_claims)
 ```
 
 ```
@@ -70,6 +70,22 @@ frozen/assemble.py    逐条 claim 装配 112 维特征向量
 （v1，逐字移植自升级提交 `f03b27a^`）。每一项差异都有测试锁住
 （`tests/test_decompose_v1.py`）。
 
+## 两条打分路径，以及报告数值出自哪一条
+
+这是本仓库最容易踩错的一点：
+
+| | 路径 A（实时） | 路径 B（冻结） |
+|---|---|---|
+| 入口 | `QACDPipeline.score(question, answer, image)` | `QACDPipeline.score_evidence_frame(evidence)` |
+| 特征 | `qacd/features.py`，**48 列** | `frozen/`，**112 列** |
+| HTTP 接口 | `POST /v1/qacd/risk`（响应中 `feature_dim: 48`） | 不对外提供 |
+| 是否产出报告数值 | **不是** | **是** |
+
+**平台调 HTTP 接口拿到的分，与交付文档里报的分不是同一条路径算出来的。** 两者都正确，
+但不可混用：给 `QACDPipeline(assembler=...)` 传入冻结装配器只会把**列名**换成冻结的
+112 个，列**值**仍然来自 48 维实时路径，缺的 93 列会被静默填 0。字段契约见
+**[docs/02-接口文档.md](docs/02-接口文档.md)**。
+
 ## 实验数据与结果
 
 **本仓库不包含实验数据，也不包含结果数值。**
@@ -91,7 +107,8 @@ python tools/export_bundle.py          # 特征矩阵与参考分数 -> artifact
 
 **缺少数据时的行为**：以上脚本以退出码 **2** 明确报出缺失项与恢复步骤，不会抛栈、
 也不会在零输入上报告成功。测试中依赖数据的 14 项显示为 `skipped`
-（`pytest -rs` 会打印原因），其余 162 项不需要任何数据。
+（`pytest -rs` 会打印原因），其余 174 项不需要任何数据。另有 1 项校验对接表生成器的测试
+在缺少 `python-docx` 时同样跳过（该依赖只用于生成交付 Word，未列入 `requirements.txt`）。
 
 数据到位后，`QACDPipeline` 可以直接用冻结特征集打分：
 
@@ -127,7 +144,7 @@ claim_risk = pipeline.score_evidence_frame(test_frame)   # 每条 claim 一个�
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 162 passed + 14 skipped（跳过项需实验数据）
+python -m pytest -q                  # 174 passed + 15 skipped（14 项需数据，1 项需 python-docx）
 python scripts/demo_offline.py       # 端到端离线演示（合成开发集）
 qacd demo                            # 同上的 CLI 版本
 
@@ -158,7 +175,7 @@ qacd serve --scorer scorer.json --port 8080
 
 | 组件 | 状态 |
 |---|---|
-| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，162 项离线测试覆盖 |
+| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，174 项离线测试覆盖 |
 | 特征层 `frozen/`（112 维冻结特征工程） | 完整；逐元素对齐检查在数据到位后可运行 |
 | 分解 v1（`qacd/decompose_v1.py`） | 完整；冻结 claim table 复现检查同上 |
 | 分解 v2（`qacd/decompose.py`） | 完整，仓库默认；**不是**产出报告数值的版本 |
@@ -237,7 +254,7 @@ QACD/
 ├── configs/               参考配置与接口 schema
 ├── docs/                  方法、接口、部署、对接说明
 ├── scripts/               离线演示 + 数据到齐后的验证脚本
-└── tests/                 176 项测试（162 离线 + 14 需数据）
+└── tests/                 189 项测试（174 离线 + 15 需数据/依赖）
 ```
 
 ## 引用

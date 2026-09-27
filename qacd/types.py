@@ -102,9 +102,34 @@ class ResponseRisk:
     # Individual evidence channels, exposed for downstream routing/audit.
     channels: Dict[str, float] = field(default_factory=dict)
 
+    @property
+    def calibrated_confidence(self) -> float:
+        """Confidence that the answer is *not* high-risk, on the calibrated scale.
+
+        This is the complement of :attr:`risk_score` and nothing else. It is a
+        derived property rather than a stored field so that it can never drift
+        out of agreement with the score it summarises.
+
+        What "calibrated" means here depends on which head produced the score:
+
+        * with the MVR fusion head fitted, ``risk_score`` is the output of a
+          response-level logistic model, so this is a genuine calibrated
+          probability;
+        * without it, ``risk_score`` is the maximum over calibrated per-claim
+          risks. The maximum operator is deliberately conservative (see
+          :mod:`qacd.aggregate`), so in that configuration this confidence is a
+          conservative estimate -- a lower bound rather than an unbiased
+          probability.
+
+        The two configurations are distinguished by :attr:`channels`: a
+        ``fused_score`` entry is present exactly when the fusion head fired.
+        """
+        return round(1.0 - self.risk_score, 6)
+
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
         payload["claims"] = [c.to_dict() for c in self.claims]
+        payload["calibrated_confidence"] = self.calibrated_confidence
         return payload
 
 

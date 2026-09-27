@@ -78,6 +78,7 @@ def test_response_payload_contract():
     for key in [
         "risk_score",
         "is_high_risk",
+        "calibrated_confidence",
         "threshold",
         "num_claims",
         "claims",
@@ -89,6 +90,10 @@ def test_response_payload_contract():
     ]:
         assert key in payload, key
     assert isinstance(payload["claims"], list)
+    # Derived, never stored: the two numbers cannot disagree.
+    assert payload["calibrated_confidence"] == pytest.approx(
+        1.0 - payload["risk_score"], abs=1e-6
+    )
     assert isinstance(payload["is_high_risk"], bool)
     assert json.dumps(payload)  # must be JSON-serialisable as-is
 

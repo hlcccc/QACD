@@ -20,12 +20,77 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+#: Presentation order of the risk response's fields in the 出参 column. Only
+#: the headline fields are listed -- docs/02-接口文档.md carries the full schema.
+#: Every name here is checked against the live ``ResponseRisk`` before the
+#: document is written, so the table can never advertise a field the service
+#: does not actually return. That is exactly how the previous revision came to
+#: promise ``calibrated_confidence`` while the service returned no such key.
+RESPONSE_FIELD_ORDER = [
+    "risk_score",
+    "is_high_risk",
+    "calibrated_confidence",
+    "num_claims",
+    "version",
+]
+
+RESPONSE_FIELD_TYPES = {
+    "risk_score": "float(0-1)",
+    "calibrated_confidence": "float(0-1)",
+    "is_high_risk": "bool",
+    "num_claims": "int",
+    "threshold": "float",
+    "feature_dim": "int",
+    "model_calls": "int",
+    "latency_ms": "int",
+    "version": "string",
+    "claims": "list[object]",
+    "warnings": "list[string]",
+    "channels": "object",
+}
+
+
+def response_signature() -> str:
+    """Render the 出参 column from the code, refusing to guess.
+
+    Raises ``SystemExit`` if a name in :data:`RESPONSE_FIELD_ORDER` is not a key
+    of ``ResponseRisk.to_dict()``. Drift is therefore a build failure rather
+    than a quietly wrong row in a document that goes to the project office.
+    """
+    from qacd.types import ResponseRisk
+
+    sample = ResponseRisk(risk_score=0.0, is_high_risk=False, threshold=0.5, num_claims=0)
+    actual = set(sample.to_dict())
+    unknown = [name for name in RESPONSE_FIELD_ORDER if name not in actual]
+    if unknown:
+        raise SystemExit(
+            "出参表引用了代码里不存在的字段: "
+            + ", ".join(unknown)
+            + "\n  实际字段: "
+            + ", ".join(sorted(actual))
+            + "\n  请同步 scripts/make_integration_docx.py 的 RESPONSE_FIELD_ORDER"
+        )
+    rendered = ", ".join(
+        f'"{name}": "{RESPONSE_FIELD_TYPES.get(name, "object")}"'
+        for name in RESPONSE_FIELD_ORDER
+    )
+    return "{" + rendered + "}"
+
+
+#: Placeholders that must never survive into a document sent to the project
+#: office. The 对接负责人 column is the one field the generator cannot infer,
+#: and an empty one is the most likely reason for the table to be sent back.
+PLACEHOLDER_MARKERS = ("待补充", "待填", "待作者", "TBD", "TODO", "xxx", "XXX")
 
 # Cell values for the four technology points, in template column order:
 # 序号 | 所属子课题 | 技术点名称 | 功能简述 | 入参 | 出参 | 使用说明 |
@@ -103,26 +168,35 @@ ROWS = [
 ]
 
 #: The single technology point for 课题2 (基于不确定性量化的风险评估与校准方法).
-#: Wording follows the project application SQ2025AAA011084: multi-dimensional
-#: uncertainty decoupling, cross-modal semantic fidelity and generation-space
-#: uncertainty quantification, risk-uncertainty calibration, and early warning
-#: for high-risk generated content.
+#:
+#: The 技术点名称 follows the project application SQ2025AAA011084 verbatim, as
+#: the project office matches rows against the task book. The 功能简述, by
+#: contrast, describes what this repository actually does -- a reader who
+#: follows the GitHub link must find the same method the row describes. The two
+#: are reconcilable rather than in tension: the task book asks for "≥3 类不确定
+#: 性信号", and QACD supplies exactly three families (language-model
+#: self-consistency, mechanical image-text checking, multi-view resampling
+#: consistency) on top of question-conditioned atomic claim decomposition.
+#:
+#: An earlier revision described the method in task-book vocabulary only
+#: ("多维不确定性解耦", "跨模态语义保真度") and named it nothing like the
+#: repository. That reads as a different method from the one being delivered.
 TOPIC2_ROWS = [
     [
         "基于不确定性量化的多模态生成内容风险评估与校准",
-        "采用多维不确定性解耦 + 风险-不确定性映射校准双架构，覆盖跨模态语义保真度、"
-        "生成空间不确定性与证据一致性，输出生成内容风险分与校准概率，支持高风险内容提前预警。"
-        "黑盒后处理，不改动被评估模型。",
+        "采用问题条件化原子主张分解 + 结构化证据校准双架构，将回答拆解为问题条件化的"
+        "原子主张并做类型化验证路由，聚合生成自洽性、图像文字机械核对、多视图重采样"
+        "一致性三类不确定性信号，经风险-不确定性映射校准后输出生成内容风险分与校准"
+        "概率，支持高风险内容提前预警。黑盒后处理，不改动被评估模型。",
         '{"question": "string", "answer": "string", "image": "string(optional)", '
         '"threshold": "float(optional)"}',
-        '{"risk_score": "float(0-1)", "is_high_risk": "bool", '
-        '"calibrated_confidence": "float", "num_claims": "int", "version": "string"}',
+        response_signature(),
         "使用 GitHub 链接中提供的 qacd 包与 run.py，本地运行环境依赖见 GitHub requirements.txt",
         "单卡 40G 显存",
         STAGE,
         PAPER,
         REPO,
-        "湖南大学（待补充）",
+        OWNER,
     ],
 ]
 
@@ -265,7 +339,24 @@ def main() -> int:
         action="store_true",
         help="fill the single 课题2 row instead of the four技术点 rows",
     )
+    parser.add_argument(
+        "--owner",
+        default=None,
+        help="对接负责人, written into the last column. Falls back to the "
+             "placeholder constant, which is rejected below -- an empty contact "
+             "is the most likely reason for the table to be sent back.",
+    )
     args = parser.parse_args()
+
+    owner = args.owner if args.owner is not None else OWNER
+    if any(marker in owner for marker in PLACEHOLDER_MARKERS):
+        raise SystemExit(
+            "对接负责人 仍是占位符: "
+            + repr(owner)
+            + "\n  这是平台方唯一的联系方式，留空或占位会被退回。"
+            + "\n  请用 --owner \"湖南大学 张老师\" 传入真实负责人。"
+            + "\n  若确实要生成草稿，请显式传 --owner \"（草稿，勿外发）\"。"
+        )
 
     document = docx.Document(args.template)
 
@@ -281,7 +372,11 @@ def main() -> int:
     rows = TOPIC2_ROWS if args.topic2 else ROWS
     for offset, values in enumerate(rows):
         row = table.rows[2 + offset]
-        for col, value in enumerate([SUBTopic] + list(values), start=1):
+        # 对接负责人 comes from the command line, so the committed source never
+        # carries a real person's name and the value cannot be forgotten.
+        values = list(values)
+        values[-1] = owner
+        for col, value in enumerate([SUBTopic] + values, start=1):
             write_cell(row.cells[col], value)
         # Emphasise the technology name (column 2) for scanability.
         name_run = row.cells[2].paragraphs[0].runs[0]
