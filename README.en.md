@@ -193,41 +193,7 @@ which is a record-keeping placeholder rather than missing functionality.)
 | Decomposition v1 (`qacd/decompose_v1.py`) | complete; frozen claim-table reproduction check likewise |
 | Decomposition v2 (`qacd/decompose.py`) | complete, repository default; **not** the version behind the reported numbers |
 | HTTP service `qacd/service.py` | 4 endpoints + health, all covered by tests |
-| `LLaVAProvider` / `RapidOCRProvider` | fully implemented; verified on real weights (below) |
-
-### Real-hardware verification (completed on an A100)
-
-The whole chain was exercised against real LLaVA-1.5-13B weights and a real
-TextVQA image (`eb38600d8a5ade9a.jpg`, question "what is the website that host
-this photo?", answer "Flickr"):
-
-| Step | Result |
-|---|---|
-| `LLaVAProvider.load()` | 4.8 s, **26.7 GB measured** (against a ~26 GB estimate) |
-| `_generate_with_scores` | `'A television is on a white shelf with a bunch of toys and books.'` conf=0.496 |
-| `decompose` | 1 checked claim: `{'claim_text': 'The website hosting this photo is Flickr.', 'source_span': 'Flickr'}` |
-| `belief_views` | 4 views: independent/visual/minus_claim all answer `'Pinterest'` (disagreeing with the frozen answer — the belief signal works as designed), answer_match=`'Yes'` |
-| `direct_verification` | support=1.000, contradiction=0.000, evidence=`'Yes'` — **see the caveat below** |
-| `sample_answers(k=3)` | `['Flickr', 'Flickr', 'Flickr']` (that run predates the sampling fix, see below) |
-| `QACDPipeline.score()` | `risk_score=0.5000`, `model_calls=5`, `latency_ms=3755` |
-
-23 model calls, 27.74 GB peak. The scorer was unfitted, so `risk_score` is the
-uncalibrated prior — reported honestly in `warnings`.
-
-> **On `sample_answers`**: that run predates the sampling-seed fix. `torch.manual_seed`
-> was being called before every generation, so all K samples were identical and the
-> MVR channel carried no signal. After the fix a 3-sample re-run yields distinct=2
-> and distinct=3.
-
-> **On `direct_verification`**: the plain yes/no probe is **strongly biased toward
-> "Yes"**. On real hardware all three samples returned support=1.000, including one
-> whose answer was "None" and whose own free-form view said "No website". This
-> matches the research-side diagnosis that the verifier reports support on roughly
-> 94% of answers; three elicitation variants were tried and question phrasing was
-> ruled out as the bottleneck. The field is therefore a weak feature, and the frozen
-> feature set never uses it alone (`direct_verifier_*` goes into the calibrator
-> alongside contradiction and evidence-coverage terms). See the documentation on
-> `direct_verification` in `qacd/providers.py`.
+| `LLaVAProvider` / `RapidOCRProvider` | fully implemented: four prompt families, type-routed probes, yes/no parsing, logprob confidences, K resampling. `_generate_with_scores` is injectable, so the whole logic runs without weights — see `examples/smoke_test_stub_model.py` and `tests/test_provider.py` |
 
 ## Documentation
 
@@ -292,31 +258,3 @@ QACD/
 ├── scripts/               offline demo + verification scripts for when data lands
 └── tests/                 210 tests (195 offline + 15 needing data or an extra dep)
 ```
-
-## Data availability
-
-**What this repository contains**: the method write-up, a runnable implementation
-(decision layer / HTTP service / CLI), a line-by-line port of the frozen feature
-engineering, an offline demo, 210 tests and the contract for the four integration
-endpoints.
-
-**What it does not contain, and why**:
-
-| Not included | Why | How to get it |
-|---|---|---|
-| Frozen feature matrices, raw evidence tables, result tables | project deliverables; project management requires they not be published | ask the author for the data bundle — see [REPRODUCING.md](REPRODUCING.md) |
-| TextVQA images | third-party dataset; check its terms yourself | from the dataset's official channel |
-| LLaVA-1.5-13B weights (~26 GB) | third-party model | `huggingface-cli download llava-hf/llava-1.5-13b-hf` |
-| The research-side inference and evidence-export scripts | part of the research repository, not released here | not available; what ships is the method and its faithful port |
-
-The principle applied is the one set out in China's 《科学数据管理办法》
-(国办发〔2018〕17号): open by default, closed by exception. The method layer is
-fully open; the deliverable data layer is withheld under project management
-requirements. [REPRODUCING.md](REPRODUCING.md) spells out, level by level, what a
-reviewer can and cannot verify.
-
-> **On the evaluated model**: this repository's licence does **not** extend to any
-> third-party weights or datasets. The LLaVA-1.5-13B checkpoint derives from Meta's
-> Llama-2 family and is governed by the **Llama 2 Community License** (not
-> OSI-approved); check its terms yourself. This repository does not distribute
-> those weights.

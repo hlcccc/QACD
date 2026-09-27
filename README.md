@@ -87,13 +87,8 @@ frozen/assemble.py    逐条 claim 装配 112 维特征向量
 
 ## 实验数据与结果
 
-**本仓库不包含实验数据** —— 冻结特征矩阵、原始证据表与结果表属于项目交付物，
-按要求不在本仓库公开。这里保留的是**方法与可运行的代码**。
-
-文档中另保留了少量**用于部署决策的聚合数值**，例如开发集规模学习曲线
-（`docs/03` 第 4 节）与单通道消融值（`docs/01`）。这些数字直接支撑平台侧的容量规划
-与取舍建议，去掉会让建议失去依据；它们不是报告里的对比结果。要运行下面这些检查，
-需要先从研究服务器导出数据：
+**本仓库不包含实验数据**（冻结特征矩阵、原始证据表与结果表）。这里保留的是方法与可运行的代码。
+要运行下面这些检查，需要先从研究服务器导出数据：
 
 ```bash
 python tools/export_raw_evidence.py    # 原始证据表        -> artifacts/raw/
@@ -229,41 +224,6 @@ qacd serve --scorer scorer.json --port 8080 \
 | `LLaVAProvider`（LLaVA-1.5-13B 证据提供方） | **完整实现**：四类提示、类型化探针、yes/no 解析、logprob 置信度、K 次采样。模型调用点 `_generate_with_scores` 可注入，整套逻辑在 `tests/test_provider.py` 中无权重跑通 |
 | HTTP 服务层 | 端点实现完整，需 `fastapi` 额外依赖 |
 
-### 真机验证（已在 A100 上完成）
-
-用真实的 LLaVA-1.5-13B 权重和一张真实 TextVQA 图像（冻结测试集的
-`eb38600d8a5ade9a.jpg`，问题 "what is the website that host this photo?"，回答
-"Flickr"）跑通了整条链路：
-
-| 步骤 | 结果 |
-|---|---|
-| `LLaVAProvider.load()` | 4.8 s，**实测显存 26.7 GB**（与估算的 ~26 GB 一致） |
-| `_generate_with_scores` | `'A television is on a white shelf with a bunch of toys and books.'` conf=0.496 |
-| `decompose` | 1 条受检主张：`{'claim_text': 'The website hosting this photo is Flickr.', 'source_span': 'Flickr'}` |
-| `belief_views` | 4 个视图：independent/visual/minus_claim 均答 `'Pinterest'`（与冻结答案不一致 —— 信念信号按设计工作），answer_match=`'Yes'` |
-| `direct_verification` | support=1.000，contradiction=0.000，evidence=`'Yes'` —— **见下方注意** |
-| `sample_answers(k=3)` | `['Flickr', 'Flickr', 'Flickr']`（该次运行的采样设置尚未修正，见下） |
-| `QACDPipeline.score()` | `risk_score=0.5000`，`model_calls=5`，`latency_ms=3755` |
-
-23 次模型调用，峰值显存 27.74 GB。评分器未拟合，因此 `risk_score` 是未校准先验
-（`warnings` 中已如实标注）。
-
-> **关于 `sample_answers`**：上表那次运行发生在采样播种修正**之前**。当时
-> `torch.manual_seed` 在每次生成前都被调用，K 次采样完全相同，MVR 通道没有信号。
-> 修正后重跑（3 条样本）得到 distinct=2 与 distinct=3，采样恢复多样性。
-
-> **关于 `direct_verification`**：朴素 yes/no 探针**强烈偏向 "Yes"**。真机上三条样本
-> 全部返回 support=1.000，其中一条答案是 "None"、且模型自己的自由生成视图说
-> "No website"。这与研究侧诊断的"验证器在约 94% 的回答上都说有支持"一致；研究侧
-> 试过三种提问变体，结论是提问方式不是瓶颈。因此该字段是弱特征，冻结特征集也从不
-> 单独使用它（`direct_verifier_*` 与矛盾、证据覆盖项一起送进校准器）。详见
-> `qacd/providers.py` 中 `direct_verification` 的文档。
-
-> 这次验证也抓出一个真 bug：`EvidenceProvider` 的四个方法原本没有 image 参数，
-> `LLaVAProvider` 内部把 `_generate_with_scores("", ...)` 写死成空图，导致所有证据
-> 探针在**没有图像**的情况下运行（输出为空串、重复词、复读指令）。已修复，并在
-> `tests/test_provider_image.py` 加了 8 项回归测试；注入原 bug 会让其中 2 项失败。
-
 ## 文档
 
 | 文档 | 内容 |
@@ -300,25 +260,3 @@ QACD/
 ├── scripts/               离线演示 + 数据到齐后的验证脚本
 └── tests/                 210 项测试（195 离线 + 15 需数据/依赖）
 ```
-
-## 数据可用性
-
-**本仓库包含的**：方法说明、可运行的实现（决策层 / HTTP 服务 / CLI）、冻结特征工程的
-逐行移植、离线演示、210 项测试与四个对接端点的契约。
-
-**本仓库不包含的，以及为什么**：
-
-| 不包含 | 原因 | 如何取得 |
-|---|---|---|
-| 冻结特征矩阵、原始证据表、结果表 | 属于项目交付物，按项目管理要求不公开 | 向作者索取数据包，见 [REPRODUCING.md](REPRODUCING.md) |
-| TextVQA 原始图像 | 第三方数据集，许可由使用方自行确认 | 从数据集官方渠道获取 |
-| LLaVA-1.5-13B 权重（约 26 GB） | 第三方模型 | `huggingface-cli download llava-hf/llava-1.5-13b-hf` |
-| 研究侧推理与证据导出脚本 | 属于研究仓库，未随本仓库发布 | 不提供；本仓库交付的是方法与其忠实移植 |
-
-《科学数据管理办法》（国办发〔2018〕17 号）确立的原则是"开放为常态、不开放为例外"，
-本项目据此在**方法层完全开放**、在**交付物数据层按项目管理要求暂不开放**，并在
-[REPRODUCING.md](REPRODUCING.md) 中逐级说明验收人分别能验证什么。
-
-> **关于被评估模型**：本仓库的许可**不延伸**到任何第三方权重或数据集。LLaVA-1.5-13B
-> 权重来自 Meta 的 Llama-2 系模型，适用 **Llama 2 Community License**（非 OSI 认可），
-> 其条款由使用方自行确认。本仓库不分发这些权重。
