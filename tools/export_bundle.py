@@ -1,20 +1,24 @@
 #!/usr/bin/env python
 """Export a verifiable evidence bundle for the QACD repository.
 
-Runs on the research server. It reuses the *exact* loading and feature-assembly
-functions of the frozen protocol script (imported, not re-implemented) so that
-the exported matrices are identical to what produced the frozen scorers.
+Runs on the machine that holds the research repository. It cannot run anywhere
+else: it reuses the *exact* loading and feature-assembly functions of the frozen
+protocol script, imported by path, and that script is not distributed here.
+
+This script is kept as the provenance record for how the verification bundle was
+assembled, not as something a consumer of this repository can execute. If you have
+been given a data bundle, you do not need it; see REPRODUCING.md.
 
 It performs no model inference: it only assembles already-cached evidence.
-It writes nothing outside /mnt/data/HLC.
 
-Output: /mnt/data/HLC/qacd_eval_bundle/
+Output, into --out:
     evidence_bundle.npz    claim matrices, labels, splits, MVR frames
     bundle_manifest.json   SHA256 of every source input and of the bundle
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -24,13 +28,10 @@ from pathlib import Path
 
 import numpy as np
 
-PROJECT = Path("/home/HLC/project")
-EXPERIMENTS = PROJECT / "hallucination_calibration" / "experiments"
-PROTOCOL = EXPERIMENTS / "run_conformal_selective_prediction_strict.py"
-OUT_DIR = Path("/mnt/data/HLC/qacd_eval_bundle")
-
-if str(PROJECT) not in sys.path:
-    sys.path.insert(0, str(PROJECT))
+PROJECT = Path()  # set from --research-root
+EXPERIMENTS = Path()  # set from --research-root
+PROTOCOL = Path()  # set from --research-root
+OUT_DIR = Path()  # set from --out
 
 
 def sha256_file(path: Path) -> str:
@@ -51,7 +52,36 @@ def load_protocol():
     return module
 
 
-def main() -> int:
+def _parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--research-root",
+        required=True,
+        help="root of the research repository; it must contain "
+             "hallucination_calibration/experiments/ with the cached evidence and "
+             "run_conformal_selective_prediction_strict.py",
+    )
+    parser.add_argument("--out", required=True, help="destination directory")
+    return parser.parse_args(argv)
+
+
+def main(argv=None) -> int:
+    global PROJECT, EXPERIMENTS, PROTOCOL, OUT_DIR
+    args = _parse_args(argv)
+    PROJECT = Path(args.research_root).expanduser().resolve()
+    EXPERIMENTS = PROJECT / "hallucination_calibration" / "experiments"
+    PROTOCOL = EXPERIMENTS / "run_conformal_selective_prediction_strict.py"
+    OUT_DIR = Path(args.out).expanduser().resolve()
+    if not PROTOCOL.is_file():
+        raise SystemExit(
+            f"research protocol not found: {PROTOCOL}\n"
+            "  --research-root must point at a checkout of the research repository.\n"
+            "  This script is author-side tooling; see REPRODUCING.md."
+        )
+    if str(PROJECT) not in sys.path:
+        sys.path.insert(0, str(PROJECT))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     P = load_protocol()
 

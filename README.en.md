@@ -61,15 +61,17 @@ contract.
 
 ## Experimental data
 
-This repository ships **without** experimental data or result values; the frozen
-feature matrices, raw evidence tables and result tables are project deliverables
-and are not published here. What ships is the method and the runnable code.
+This repository ships **without** experimental data (frozen feature matrices, raw
+evidence tables, result tables). What ships is the method and the runnable code.
 
-To run the verification scripts, export the data from the research host first:
+To run the verification scripts below you need a data bundle, which the author
+provides — see **[REPRODUCING.md](REPRODUCING.md)**. Drop `evidence_bundle.npz`
+and `raw/` into `artifacts/`:
 
-```bash
-python tools/export_raw_evidence.py    # raw evidence tables -> artifacts/raw/
-python tools/export_bundle.py          # feature matrix + reference scores -> artifacts/
+```
+artifacts/
+├── evidence_bundle.npz      # frozen feature matrices, labels, splits, reference scores
+└── raw/                     # raw evidence tables for the development and test splits
 ```
 
 | Script | What it verifies |

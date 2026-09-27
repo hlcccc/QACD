@@ -88,11 +88,14 @@ frozen/assemble.py    逐条 claim 装配 112 维特征向量
 ## 实验数据与结果
 
 **本仓库不包含实验数据**（冻结特征矩阵、原始证据表与结果表）。这里保留的是方法与可运行的代码。
-要运行下面这些检查，需要先从研究服务器导出数据：
 
-```bash
-python tools/export_raw_evidence.py    # 原始证据表        -> artifacts/raw/
-python tools/export_bundle.py          # 特征矩阵与参考分数 -> artifacts/
+要运行下面这些检查，需要一份数据包——由作者提供，取得方式见 **[REPRODUCING.md](REPRODUCING.md)**。
+把 `evidence_bundle.npz` 与 `raw/` 放到 `artifacts/` 下即可：
+
+```
+artifacts/
+├── evidence_bundle.npz      # 冻结特征矩阵、标签、划分、参考分数
+└── raw/                     # 开发集与测试集的原始证据表
 ```
 
 | 脚本 | 验证内容 |
