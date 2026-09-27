@@ -123,7 +123,7 @@ class QACDPipeline:
         calls = 0
         completion = None
         if hasattr(self.provider, "decompose"):
-            completion = self.provider.decompose(question, answer, self.config.max_claims)
+            completion = self.provider.decompose(question, answer, self.config.max_claims, image)
             calls += 1
 
         decomposition = decompose_claims(
@@ -137,8 +137,10 @@ class QACDPipeline:
 
         rows: List[Dict[str, float]] = []
         for claim in claims:
-            views = self.provider.belief_views(question, answer, claim.claim_text)
-            direct = self.provider.direct_verification(question, answer, claim.claim_text, claim.claim_type)
+            views = self.provider.belief_views(question, answer, claim.claim_text, image)
+            direct = self.provider.direct_verification(
+                question, answer, claim.claim_text, claim.claim_type, image
+            )
             calls += 1
             rows.append(
                 assemble_claim_features(
@@ -202,7 +204,7 @@ class QACDPipeline:
         channels: Dict[str, float] = {"evidence_score": evidence_score}
         final_score = evidence_score
         if self.config.k:
-            sampled = self.provider.sample_answers(question, int(self.config.k))
+            sampled = self.provider.sample_answers(question, int(self.config.k), image)
             calls += len(sampled)
             mvr = mvr_features(sampled, ocr_texts, k=int(self.config.k))
             channels.update({k: float(v) for k, v in mvr.items()})
@@ -285,7 +287,7 @@ class QACDPipeline:
 
             if self.config.k:
                 ocr = self.provider.ocr(image)
-                sampled = self.provider.sample_answers(question, int(self.config.k))
+                sampled = self.provider.sample_answers(question, int(self.config.k), image)
                 mvr = mvr_features(sampled, list(ocr.texts), k=int(self.config.k))
                 response_mvr.append([float(mvr[f]) for f in MVR_FEATURES])
         if not claim_rows:

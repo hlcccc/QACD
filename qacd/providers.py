@@ -108,16 +108,24 @@ class EvidenceProvider(Protocol):
     def ocr(self, image: str) -> OCRRecord:
         """Text read from the image."""
 
-    def belief_views(self, question: str, answer: str, claim_text: str) -> List[VerificationView]:
-        """Support/confidence readings across the belief views."""
+    def belief_views(
+        self, question: str, answer: str, claim_text: str, image: str = ""
+    ) -> List[VerificationView]:
+        """Support/confidence readings across the belief views.
 
-    def direct_verification(self, question: str, answer: str, claim_text: str, claim_type: str) -> DirectVerification:
+        ``image`` is required by any provider that actually looks at the picture;
+        it is passed positionally last so existing callers stay valid.
+        """
+
+    def direct_verification(
+        self, question: str, answer: str, claim_text: str, claim_type: str, image: str = ""
+    ) -> DirectVerification:
         """Direct evidence for one typed claim."""
 
-    def sample_answers(self, question: str, k: int) -> List[str]:
+    def sample_answers(self, question: str, k: int, image: str = "") -> List[str]:
         """K same-prompt generations (MVR channel)."""
 
-    def decompose(self, question: str, answer: str, max_claims: int) -> Any:
+    def decompose(self, question: str, answer: str, max_claims: int, image: str = "") -> Any:
         """Optional checked LLM decomposition; return ``None`` to force the fallback."""
 
 
@@ -161,20 +169,27 @@ class MockProvider:
         #: the image in context; the mock mirrors that so verification does not
         #: have to re-read (and cannot invent) an image path.
         self._last_ocr: OCRRecord | None = None
+        #: OCR results by image, so verification for each claim of a response
+        #: reuses one read instead of re-running the engine per claim.
+        self._ocr_cache: Dict[str, OCRRecord] = {}
 
     # -- OCR ---------------------------------------------------------------
     def ocr(self, image: str) -> OCRRecord:
-        text = self.image_text or image
-        parts = [p.strip() for p in re.split(r"[;\n]", str(text)) if p.strip()]
-        record = OCRRecord(image=str(image), texts=parts, scores=[1.0] * len(parts))
-        self._last_ocr = record
-        return record
+        key = str(image)
+        if key not in self._ocr_cache:
+            text = self.image_text or image
+            parts = [p.strip() for p in re.split(r"[;\n]", str(text)) if p.strip()]
+            self._ocr_cache[key] = OCRRecord(image=key, texts=parts, scores=[1.0] * len(parts))
+        self._last_ocr = self._ocr_cache[key]
+        return self._last_ocr
 
     def _current_ocr(self) -> OCRRecord:
         return self._last_ocr if self._last_ocr is not None else self.ocr("")
 
     # -- belief views ------------------------------------------------------
-    def belief_views(self, question: str, answer: str, claim_text: str) -> List[VerificationView]:
+    def belief_views(
+        self, question: str, answer: str, claim_text: str, image: str = ""
+    ) -> List[VerificationView]:
         claim_words = {w for w in _WORD_RE.findall(claim_text.lower()) if w not in _STOP}
         answer_words = {w for w in _WORD_RE.findall(answer.lower()) if w not in _STOP}
         overlap = len(claim_words & answer_words) / max(len(claim_words), 1)
@@ -195,7 +210,13 @@ class MockProvider:
         return views
 
     # -- direct verification ----------------------------------------------
-    def direct_verification(self, question: str, answer: str, claim_text: str, claim_type: str) -> DirectVerification:
+    def direct_verification(
+        self, question: str, answer: str, claim_text: str, claim_type: str, image: str = ""
+    ) -> DirectVerification:
+        # Reuse the read already taken for this response; only fetch when the
+        # caller supplies an image nobody has read yet.
+        if image and (self._last_ocr is None or self._last_ocr.image != str(image)):
+            self.ocr(image)
         ocr = self._current_ocr()
         ocr_text = " ".join(ocr.texts).lower()
         claim_words = {w for w in _WORD_RE.findall(claim_text.lower()) if w not in _STOP}
@@ -215,7 +236,7 @@ class MockProvider:
         )
 
     # -- MVR ---------------------------------------------------------------
-    def sample_answers(self, question: str, k: int) -> List[str]:
+    def sample_answers(self, question: str, k: int, image: str = "") -> List[str]:
         if self.sampled_pool:
             out = list(self.sampled_pool[:k])
             while len(out) < k:
@@ -226,7 +247,7 @@ class MockProvider:
         return [str(question or "")] * int(k)
 
     # -- decomposition -----------------------------------------------------
-    def decompose(self, question: str, answer: str, max_claims: int) -> Any:
+    def decompose(self, question: str, answer: str, max_claims: int, image: str = "") -> Any:
         return None  # force the deterministic fallback
 
 
@@ -244,6 +265,9 @@ class RapidOCRProvider:
     name = "rapidocr"
 
     def __init__(self, engine: Any = None):
+        #: OCR is the expensive part of the mechanical channel, and every claim
+        #: of a response reads the same image, so results are cached per image.
+        self._cache: Dict[str, OCRRecord] = {}
         if engine is None:
             try:
                 from rapidocr_onnxruntime import RapidOCR  # type: ignore
@@ -255,6 +279,9 @@ class RapidOCRProvider:
         self.engine = engine
 
     def ocr(self, image: str) -> OCRRecord:
+        key = str(image)
+        if key in self._cache:
+            return self._cache[key]
         result, _ = self.engine(image)
         texts: List[str] = []
         scores: List[float] = []
@@ -264,7 +291,8 @@ class RapidOCRProvider:
                 scores.append(float(row[2]))
             except (IndexError, TypeError, ValueError):
                 continue
-        return OCRRecord(image=str(image), texts=texts, scores=scores)
+        self._cache[key] = OCRRecord(image=key, texts=texts, scores=scores)
+        return self._cache[key]
 
 
 class LLaVAProvider:
@@ -309,6 +337,7 @@ class LLaVAProvider:
         temperature: float = 0.7,
         top_p: float = 0.9,
         max_new_tokens: int = 64,
+        decomposition_max_new_tokens: int = 256,
         device: str = "cuda",
         dtype: str = "float16",
         seed: Optional[int] = None,
@@ -319,6 +348,7 @@ class LLaVAProvider:
         self.temperature = float(temperature)
         self.top_p = float(top_p)
         self.max_new_tokens = int(max_new_tokens)
+        self.decomposition_max_new_tokens = int(decomposition_max_new_tokens)
         self.device = device
         self.dtype = dtype
         self.seed = seed
@@ -350,8 +380,24 @@ class LLaVAProvider:
             self.model_path, torch_dtype=self.dtype, device_map=self.device
         )
         self._model.eval()
+        if self.seed is not None:
+            # Seed once, here. Seeding before every generation would make the K
+            # samples of one prompt identical and the MVR channel would carry no
+            # signal at all.
+            self._torch.manual_seed(int(self.seed))
 
-    def _generate_with_scores(self, image: str, prompt: str, do_sample: bool) -> tuple[str, float]:
+    def reseed(self) -> None:
+        """Re-apply the seed. Anything sampling after this repeats the sequence."""
+        if self.seed is not None and self._torch is not None:
+            self._torch.manual_seed(int(self.seed))
+
+    def _generate_with_scores(
+        self,
+        image: str,
+        prompt: str,
+        do_sample: bool,
+        max_new_tokens: int | None = None,
+    ) -> tuple[str, float]:
         """Run one generation. Returns ``(text, mean_token_probability)``.
 
         This is the only method that touches the model. Override it, or pass
@@ -379,7 +425,7 @@ class LLaVAProvider:
         inputs = self._processor(images=pil, text=text, return_tensors="pt").to(self.device)
 
         kwargs = {
-            "max_new_tokens": self.max_new_tokens,
+            "max_new_tokens": int(max_new_tokens or self.max_new_tokens),
             "do_sample": bool(do_sample),
             "output_scores": True,
             "return_dict_in_generate": True,
@@ -387,8 +433,6 @@ class LLaVAProvider:
         if do_sample:
             kwargs["temperature"] = self.temperature
             kwargs["top_p"] = self.top_p
-        if self.seed is not None:
-            torch.manual_seed(int(self.seed))
 
         with torch.inference_mode():
             output = self._model.generate(**inputs, **kwargs)
@@ -508,19 +552,25 @@ class LLaVAProvider:
             return OCRRecord(image=str(image), texts=[], scores=[])
         return self.ocr_provider.ocr(image)
 
-    def decompose(self, question: str, answer: str, max_claims: int) -> Any:
+    def decompose(self, question: str, answer: str, max_claims: int, image: str = "") -> Any:
         """Checked LLM decomposition; ``None`` makes the caller use the fallback."""
         prompt = build_decomposition_prompt(question, answer, max_claims)
-        text, _ = self._generate_with_scores("", prompt, False)
+        # The JSON decomposition is far longer than a yes/no probe; the shared
+        # budget truncates it and nothing ever parses.
+        text, _ = self._generate_with_scores(
+            image, prompt, False, max_new_tokens=self.decomposition_max_new_tokens
+        )
         claims = parse_json_claims(text)
         return claims or None
 
-    def belief_views(self, question: str, answer: str, claim_text: str) -> List[VerificationView]:
+    def belief_views(
+        self, question: str, answer: str, claim_text: str, image: str = ""
+    ) -> List[VerificationView]:
         """Four claim-specific belief readings."""
         views: List[VerificationView] = []
         for view in ("independent", "visual", "minus_claim"):
             prompt = self.build_belief_prompt(view, question, answer, claim_text)
-            generated, confidence = self._generate_with_scores("", prompt, False)
+            generated, confidence = self._generate_with_scores(image, prompt, False)
             support = self._similarity(generated, claim_text)
             views.append(
                 VerificationView(
@@ -533,7 +583,7 @@ class LLaVAProvider:
             )
 
         match_prompt = self.build_belief_prompt("answer_match", question, answer, claim_text)
-        match_text, match_confidence = self._generate_with_scores("", match_prompt, False)
+        match_text, match_confidence = self._generate_with_scores(image, match_prompt, False)
         match_support = self.parse_support(match_text)
         views.append(
             VerificationView(
@@ -547,11 +597,11 @@ class LLaVAProvider:
         return views
 
     def direct_verification(
-        self, question: str, answer: str, claim_text: str, claim_type: str
+        self, question: str, answer: str, claim_text: str, claim_type: str, image: str = ""
     ) -> DirectVerification:
         """Type-routed direct probe plus OCR and numeric sub-probes."""
         direct_text, direct_confidence = self._generate_with_scores(
-            "", self.build_direct_prompt(claim_text, claim_type), False
+            image, self.build_direct_prompt(claim_text, claim_type), False
         )
         support = self.parse_support(direct_text)
         contradiction = 1.0 - support if support != 0.5 else 0.5
@@ -559,10 +609,12 @@ class LLaVAProvider:
 
         # OCR probe: only meaningful for text claims, but cheap enough to always
         # run and route on afterwards.
-        ocr_text, _ = self._generate_with_scores("", self.build_ocr_prompt(), False)
+        ocr_text, _ = self._generate_with_scores(image, self.build_ocr_prompt(), False)
         ocr_support = self._similarity(ocr_text, claim_text)
 
-        number_text, _ = self._generate_with_scores("", self.build_number_prompt(claim_text), False)
+        number_text, _ = self._generate_with_scores(
+            image, self.build_number_prompt(claim_text), False
+        )
         number_support = self.parse_support(number_text)
 
         return DirectVerification(
@@ -576,7 +628,7 @@ class LLaVAProvider:
             visual_evidence_support=support,
         )
 
-    def sample_answers(self, question: str, k: int) -> List[str]:
+    def sample_answers(self, question: str, k: int, image: str = "") -> List[str]:
         """K stochastic generations of the identical prompt (MVR input)."""
         k = int(k)
         if k < 1:
@@ -586,4 +638,4 @@ class LLaVAProvider:
             f"Question: {question}\n"
             "Answer:"
         )
-        return [self._generate_with_scores("", prompt, True)[0].strip() for _ in range(k)]
+        return [self._generate_with_scores(image, prompt, True)[0].strip() for _ in range(k)]

@@ -1,4 +1,4 @@
-﻿# QACD — 问题条件化原子主张分解
+# QACD — 问题条件化原子主张分解
 
 **面向 LVLM 视觉问答的回答级错误风险后处理评分**
 
@@ -169,8 +169,29 @@ qacd serve --scorer scorer.json --port 8080
 | `LLaVAProvider`（LLaVA-1.5-13B 证据提供方） | **完整实现**：四类提示、类型化探针、yes/no 解析、logprob 置信度、K 次采样。模型调用点 `_generate_with_scores` 可注入，整套逻辑在 `tests/test_provider.py` 中无权重跑通 |
 | HTTP 服务层 | 端点实现完整，需 `fastapi` 额外依赖 |
 
-**本仓库尚未验证的一件事**：用真实 LLaVA-1.5-13B 权重把评分链路端到端跑一遍。
-`LLaVAProvider` 的代码是完整的，但开发环境没有 GPU 与权重，因此那一次真实推理尚未发生。
+### 真机验证（已在 A100 上完成）
+
+用真实的 LLaVA-1.5-13B 权重和一张真实 TextVQA 图像（冻结测试集的
+`eb38600d8a5ade9a.jpg`，问题 "what is the website that host this photo?"，回答
+"Flickr"）跑通了整条链路：
+
+| 步骤 | 结果 |
+|---|---|
+| `LLaVAProvider.load()` | 4.8 s，**实测显存 26.7 GB**（与估算的 ~26 GB 一致） |
+| `_generate_with_scores` | `'A television is on a white shelf with a bunch of toys and books.'` conf=0.496 |
+| `decompose` | 1 条受检主张：`{'claim_text': 'The website hosting this photo is Flickr.', 'source_span': 'Flickr'}` |
+| `belief_views` | 4 个视图：independent/visual/minus_claim 均答 `'Pinterest'`（与冻结答案不一致 —— 信念信号按设计工作），answer_match=`'Yes'` |
+| `direct_verification` | support=1.000，contradiction=0.000，evidence=`'Yes'` |
+| `sample_answers(k=3)` | `['Flickr', 'Flickr', 'Flickr']` |
+| `QACDPipeline.score()` | `risk_score=0.5000`，`model_calls=5`，`latency_ms=3755` |
+
+23 次模型调用，峰值显存 27.74 GB。评分器未拟合，因此 `risk_score` 是未校准先验
+（`warnings` 中已如实标注）。
+
+> 这次验证也抓出一个真 bug：`EvidenceProvider` 的四个方法原本没有 image 参数，
+> `LLaVAProvider` 内部把 `_generate_with_scores("", ...)` 写死成空图，导致所有证据
+> 探针在**没有图像**的情况下运行（输出为空串、重复词、复读指令）。已修复，并在
+> `tests/test_provider_image.py` 加了 8 项回归测试；注入原 bug 会让其中 2 项失败。
 
 ## 文档
 
