@@ -9,8 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
 import pytest
+
+# Must precede the pandas import: a plain import raises at collection time,
+# so a NumPy-only install would error instead of skipping.
+pytest.importorskip("pandas")
+
+import pandas as pd  # noqa: E402
 
 from qacd import decompose as v2
 from qacd import decompose_v1 as v1

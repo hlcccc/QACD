@@ -11,10 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
+# Must precede the pandas import: a plain import raises at collection
+# time, so a NumPy-only install would error instead of skipping.
 pytest.importorskip("pandas")
+
+import pandas as pd  # noqa: E402
+
 
 from frozen.assemble import FrozenFeatureAssembler  # noqa: E402
 from frozen.build import build_matrices, claim_images, load_split  # noqa: E402
