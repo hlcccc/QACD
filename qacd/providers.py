@@ -31,6 +31,7 @@ import difflib
 import hashlib
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Sequence, runtime_checkable
 
 from qacd.decompose import (
@@ -162,6 +163,11 @@ class MockProvider:
 
     name = "mock"
 
+    #: Read by :func:`qacd.pipeline.provider_kind` and recorded in the exported
+    #: scorer, so a file fitted on this provider is identifiable as carrying no
+    #: model evidence.
+    provider_kind = "mock"
+
     def __init__(self, image_text: str = "", sampled_pool: Sequence[str] | None = None):
         self.image_text = str(image_text or "")
         self.sampled_pool = list(sampled_pool or [])
@@ -264,6 +270,9 @@ class RapidOCRProvider:
 
     name = "rapidocr"
 
+    #: See :data:`MockProvider.provider_kind`.
+    provider_kind = "rapidocr"
+
     def __init__(self, engine: Any = None):
         #: OCR is the expensive part of the mechanical channel, and every claim
         #: of a response reads the same image, so results are cached per image.
@@ -326,6 +335,9 @@ class LLaVAProvider:
 
     name = "llava-1.5-13b"
 
+    #: See :data:`MockProvider.provider_kind`.
+    provider_kind = "llava"
+
     #: Answer grammar for the yes/no probes.
     AFFIRMATIVE = ("yes", "true", "correct", "supported", "support")
     NEGATIVE = ("no", "false", "incorrect", "unsupported", "contradict")
@@ -364,6 +376,28 @@ class LLaVAProvider:
         """Load the checkpoint. Kept lazy so importing this module is free."""
         if self._model is not None:
             return
+        # Validate the path before touching torch. A wrong --model-path is the
+        # most common first-run mistake, and reporting it as a missing
+        # dependency sends the reader off installing packages they already have.
+        if not self.model_path:
+            raise ValueError(
+                "model_path is required to load the checkpoint; pass --model-path DIR "
+                "pointing at a HuggingFace-format LLaVA-1.5-13B directory"
+            )
+        model_dir = Path(self.model_path).expanduser()
+        if not model_dir.is_dir():
+            raise FileNotFoundError(
+                f"model_path is not a directory: {self.model_path}\n"
+                "  Pass the checkpoint directory, not a file. It is ~26 GB in fp16 "
+                "and is not distributed with this repository."
+            )
+        if not (model_dir / "config.json").is_file():
+            raise FileNotFoundError(
+                f"{self.model_path} holds no config.json, so it is not a HuggingFace "
+                "checkpoint directory.\n"
+                "  Expected the output of `huggingface-cli download "
+                "llava-hf/llava-1.5-13b-hf --local-dir DIR`."
+            )
         try:
             import torch
             from transformers import AutoProcessor, LlavaForConditionalGeneration
@@ -372,8 +406,6 @@ class LLaVAProvider:
                 "LLaVAProvider needs the model extra: "
                 "pip install torch transformers accelerate pillow"
             ) from exc
-        if not self.model_path:
-            raise ValueError("model_path is required to load the checkpoint")
         self._torch = torch
         self._processor = AutoProcessor.from_pretrained(self.model_path)
         self._model = LlavaForConditionalGeneration.from_pretrained(

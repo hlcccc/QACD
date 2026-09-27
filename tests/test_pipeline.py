@@ -38,6 +38,45 @@ def _provider(sampled=None):
     return MockProvider(image_text="Dakota Digital; open 24 days", sampled_pool=sampled or [])
 
 
+class _SignalProvider(MockProvider):
+    """Mock whose resamples carry real signal, so a fusion head can be fitted.
+
+    :class:`MockProvider` cannot supply that on its own: with a fixed sampling
+    pool its MVR features are identical for every record, and with no pool they
+    vary only with the question. Either way they say nothing about correctness --
+    which is exactly the degenerate case the fusion guard exists to catch. Here
+    the resamples agree with the image text on half the questions and disagree on
+    the rest, matching how :func:`_fusion_dev_records` assigns labels.
+    """
+
+    @staticmethod
+    def _agrees(question: str) -> bool:
+        return sum(ord(c) for c in question) % 2 == 0
+
+    def sample_answers(self, question, k, image=""):
+        if self._agrees(question):
+            return ["Dakota Digital"] * int(k)
+        return ["Nikon Coolpix"] * int(k)
+
+
+def _fusion_dev_records(n=120):
+    """Development set with signal in both the evidence and the MVR channel."""
+    records = []
+    for i in range(n):
+        question = f"Is item {i} visible in this photograph?"
+        agrees = _SignalProvider._agrees(question)
+        records.append(
+            {
+                "question": question,
+                "answer": "Dakota Digital" if agrees else "Nikon Coolpix",
+                "image": "Dakota Digital; open 24 days",
+                "failed": 0 if agrees else 1,
+                "group": f"img{i}",
+            }
+        )
+    return records
+
+
 def test_every_declared_feature_name_is_produced():
     row = assemble_claim_features(
         claim_text="The answer to the question 'What brand?' is Dakota digital.",
@@ -99,24 +138,34 @@ def test_response_payload_contract():
 
 
 def test_mvr_channel_engages_and_is_reported():
-    pipeline = QACDPipeline(
-        provider=_provider(sampled=["Dakota Digital", "Dakota Digital", "Nikon"]),
-        config=QACDConfig(k=3),
-    )
-    pipeline.fit(_dev_records())
-    assert pipeline.fusion_fitted_
+    pipeline = QACDPipeline(provider=_SignalProvider(), config=QACDConfig(k=3))
+    pipeline.fit(_fusion_dev_records())
+    assert pipeline.fusion_fitted_, pipeline.fit_warnings
     result = pipeline.score("What brand is the camera?", "Dakota Digital")
     assert "mvr_unsupported_rate" in result.channels
     assert "fused_score" in result.channels
     assert result.model_calls >= 3
 
 
-def test_scorer_roundtrip_is_bit_identical(tmp_path):
+def test_fusion_head_is_not_fitted_without_mvr_signal():
+    """The guard must fire on a signal-free dev set rather than fit a bad head.
+
+    Complements the test above: that one locks the path where fusion is
+    legitimate, this one locks the refusal. Without it a future change could
+    block all fusion and only the first test would notice.
+    """
     pipeline = QACDPipeline(provider=_provider(), config=QACDConfig(k=3))
     pipeline.fit(_dev_records())
+    assert not pipeline.fusion_fitted_
+    assert pipeline.fit_warnings
+
+
+def test_scorer_roundtrip_is_bit_identical(tmp_path):
+    pipeline = QACDPipeline(provider=_SignalProvider(), config=QACDConfig(k=3))
+    pipeline.fit(_fusion_dev_records())
     path = pipeline.save(tmp_path / "scorer.json")
 
-    reloaded = QACDPipeline.load(path, provider=_provider())
+    reloaded = QACDPipeline.load(path, provider=_SignalProvider())
     assert reloaded.fitted_
     assert reloaded.fusion_fitted_
     assert reloaded.feature_names == pipeline.feature_names

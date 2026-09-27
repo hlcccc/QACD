@@ -35,6 +35,35 @@ __all__ = ["QACDConfig", "QACDPipeline", "REFERENCE_FEATURE_NAMES"]
 #: Features used by the reference pipeline's claim-level calibrator.
 REFERENCE_FEATURE_NAMES: List[str] = LM_FEATURE_NAMES + MECHANICAL_FEATURES
 
+#: Provider kinds that carry **no model evidence**. A scorer fitted on one of
+#: these is a plumbing artefact: it exercises the code path but its score has no
+#: relationship to whether an answer is wrong. The name is recorded in the
+#: exported scorer so a consumer can tell the two apart.
+NON_EVIDENCE_PROVIDERS = frozenset({"mock"})
+
+
+def provider_kind(provider: Any) -> str:
+    """Classify a provider for provenance purposes.
+
+    Deliberately structural rather than an ``isinstance`` chain: the CLI, the
+    service and third-party platforms all inject their own objects, and the only
+    thing that matters downstream is whether the evidence was real.
+    """
+    if provider is None:
+        return "none"
+    explicit = getattr(provider, "provider_kind", None)
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    name = type(provider).__name__.lower()
+    for kind, needle in (
+        ("mock", "mock"),
+        ("llava", "llava"),
+        ("rapidocr", "rapidocr"),
+    ):
+        if needle in name:
+            return kind
+    return "custom"
+
 
 @dataclass
 class QACDConfig:
@@ -104,6 +133,12 @@ class QACDPipeline:
         self.assembler = None
         if assembler is not None:
             self.attach_frozen_features(assembler)
+        #: Non-fatal problems detected while fitting. They are carried into every
+        #: later :meth:`score` call so a scorer that was fitted on degenerate
+        #: evidence cannot be used silently.
+        self.fit_warnings: List[str] = []
+        #: What the scorer was fitted on, as recorded in the exported file.
+        self.provenance: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Inference
@@ -169,9 +204,32 @@ class QACDPipeline:
         return np.clip(out, 1e-6, 1.0 - 1e-6)
 
     def score(self, question: str, answer: str, image: str = "") -> ResponseRisk:
-        """Score a single answer."""
+        """Score a single answer.
+
+        Raises
+        ------
+        RuntimeError
+            If a frozen feature assembler is attached. This path builds its
+            feature rows from the live provider (48 columns); the frozen
+            assembler expects 112. Attaching one does *not* change where the
+            values come from, and :func:`qacd.features.build_matrix` fills any
+            column it cannot find with ``0.0`` -- so the two together would
+            silently feed 93 zero columns to a calibrator fitted on real values
+            and return a confident score that means nothing. Use
+            :meth:`score_evidence_frame` with an evidence frame instead.
+        """
+        if self.assembler is not None:
+            raise RuntimeError(
+                "score() cannot be used with a frozen feature assembler attached: it "
+                "builds 48-column live features while the assembler expects "
+                f"{len(self.feature_names)}. The missing columns would be silently "
+                "filled with zeros. Call score_evidence_frame(evidence_frame) instead, "
+                "or drop the assembler for live scoring."
+            )
         started = time.perf_counter()
-        warnings: List[str] = []
+        # Warnings recorded while fitting travel with the scorer: one fitted on
+        # degenerate evidence must not be usable without saying so.
+        warnings: List[str] = list(self.fit_warnings)
 
         # The image is read exactly once and reused by both the claim-level
         # mechanical features and the response-level MVR channel.
@@ -298,9 +356,64 @@ class QACDPipeline:
         self.fitted_ = bool(self.calibrator.success_)
 
         if self.config.k and response_mvr:
-            head = np.column_stack([np.asarray(response_evidence), np.asarray(response_mvr, dtype=float)])
-            self.fusion = RidgeLogistic(l2=self.config.fusion_l2).fit(head, np.asarray(response_labels))
-            self.fusion_fitted_ = bool(self.fusion.success_)
+            mvr_matrix = np.asarray(response_mvr, dtype=float)
+            head = np.column_stack([np.asarray(response_evidence), mvr_matrix])
+            constant = [
+                name
+                for j, name in enumerate(MVR_FEATURES)
+                if float(mvr_matrix[:, j].max() - mvr_matrix[:, j].min()) <= 1e-12
+            ]
+            if len(constant) == len(MVR_FEATURES):
+                # Every MVR column is constant across the development set, so the
+                # fusion head has nothing to learn from the resampling channel.
+                self.fit_warnings.append(
+                    "MVR features are constant across the development set "
+                    f"({', '.join(constant)}); the fusion head was not fitted and "
+                    "the calibrated evidence score is returned instead. Check that "
+                    "the provider really produces K distinct samples."
+                )
+            else:
+                candidate = RidgeLogistic(l2=self.config.fusion_l2).fit(
+                    head, np.asarray(response_labels)
+                )
+                evidence_weight = (
+                    float(candidate.coef_[0]) if getattr(candidate, "success_", False) else 0.0
+                )
+                if candidate.success_ and evidence_weight < 0.0:
+                    # The head contradicts the model it is supposed to sharpen.
+                    # `evidence_score` is a calibrated P(answer is wrong), so a
+                    # negative weight means "the more likely this answer is wrong,
+                    # the less I warn about it" -- the response ranking comes out
+                    # inverted, with a confident number and no warning attached.
+                    # This is not mock-specific: any development set where the MVR
+                    # channel carries no signal can produce it. Refusing to fit
+                    # degrades to the evidence score, which is the honest answer.
+                    self.fit_warnings.append(
+                        "the fusion head placed a negative weight "
+                        f"({evidence_weight:+.4f}) on the calibrated evidence score, which "
+                        "would invert the response ranking; it was not fitted and the "
+                        "evidence score is returned instead. The MVR channel carries no "
+                        "signal on this development set."
+                    )
+                else:
+                    self.fusion = candidate
+                    self.fusion_fitted_ = bool(candidate.success_)
+
+        self.provenance = {
+            "provider_kind": provider_kind(self.provider),
+            "carries_model_evidence": provider_kind(self.provider) not in NON_EVIDENCE_PROVIDERS,
+            "claim_rows": len(claim_rows),
+            "responses": len(response_labels),
+            "k": self.config.k,
+            "fusion_fitted": bool(self.fusion_fitted_),
+            "fit_warnings": list(self.fit_warnings),
+        }
+        if provider_kind(self.provider) in NON_EVIDENCE_PROVIDERS:
+            self.fit_warnings.append(
+                f"scorer was fitted with a '{provider_kind(self.provider)}' provider, which "
+                "produces no model evidence; the score has no relationship to answer "
+                "correctness. Its only legitimate use is exercising the plumbing."
+            )
 
         if verbose:
             print(
@@ -394,6 +507,10 @@ class QACDPipeline:
             "format_version": 1,
             "config": self.config.to_dict(),
             "feature_names": self.feature_names,
+            # Recorded so a consumer can tell a plumbing artefact from a real
+            # scorer without reading the fitting script: a file whose provenance
+            # says `mock` never saw a model.
+            "provenance": dict(self.provenance),
             "calibrator": None
             if not self.fitted_
             else {
@@ -444,4 +561,19 @@ class QACDPipeline:
             fusion.std_ = np.asarray(fblob["std"], dtype=float)
             fusion.coef_ = np.asarray(fblob["coef"], dtype=float)
 
-        return cls(provider=provider, config=config, calibrator=calibrator, fusion=fusion)
+        pipeline = cls(provider=provider, config=config, calibrator=calibrator, fusion=fusion)
+        provenance = payload.get("provenance") or {}
+        pipeline.provenance = dict(provenance)
+        pipeline.fit_warnings = list(provenance.get("fit_warnings") or [])
+        if provenance and not provenance.get("carries_model_evidence", True):
+            pipeline.fit_warnings.append(
+                "this scorer was fitted on a "
+                f"'{provenance.get('provider_kind', 'non-evidence')}' provider and carries no "
+                "model evidence; any score it returns is meaningless."
+            )
+        elif not provenance:
+            pipeline.fit_warnings.append(
+                "scorer file records no provenance; it is not known what evidence it "
+                "was fitted on."
+            )
+        return pipeline

@@ -1,10 +1,17 @@
 """Command line entry point.
 
-    qacd score   --question "..." --answer "..." [--image PATH] [--scorer FILE]
+    qacd score   --question "..." --answer "..." --provider llava --model-path DIR
     qacd demo    [--json]
-    qacd fit     --data dev.jsonl --out scorer.json [--k 3]
-    qacd serve   [--scorer FILE] [--host 0.0.0.0] [--port 8080]
+    qacd fit     --data dev.jsonl --out scorer.json --provider llava --model-path DIR
+    qacd serve   --scorer scorer.json [--provider llava --model-path DIR]
     qacd version
+
+``--provider`` is **required** for ``score`` and ``fit``. The mock provider is
+still available, but it has to be asked for by name: it derives every reading
+from lexical overlap rather than from a model, so a scorer fitted on it is a
+plumbing artefact whose score has no relationship to answer correctness. Making
+that the silent default is how a first-time user ends up with a confident,
+backwards score and no indication that anything is wrong.
 """
 
 from __future__ import annotations
@@ -26,6 +33,72 @@ DEMO_IMAGE_TEXT = "Dakota Digital; open 24 days"
 DEMO_QUESTION = "What brand is the camera?"
 DEMO_ANSWER = "Dakota digital"
 
+PROVIDER_CHOICES = ("mock", "llava")
+
+_MOCK_BANNER = (
+    "!! --provider mock: this provider reads no model and no image. It exists to\n"
+    "!! exercise the plumbing. Any score it produces says nothing about whether an\n"
+    "!! answer is correct. Pass --provider llava --model-path DIR for real evidence."
+)
+
+
+def _add_provider_args(parser: argparse.ArgumentParser) -> None:
+    """Attach the evidence-provider options shared by score / fit / serve."""
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDER_CHOICES,
+        required=True,
+        help="where evidence comes from. 'llava' is the real one; 'mock' is a "
+             "model-free stand-in for plumbing tests only",
+    )
+    parser.add_argument(
+        "--model-path",
+        default=None,
+        help="frozen LLaVA checkpoint directory; required by --provider llava",
+    )
+    parser.add_argument(
+        "--no-ocr",
+        action="store_true",
+        help="do not attach the RapidOCR instrument channel (LLaVA provider only)",
+    )
+
+
+def build_provider(args) -> Any:
+    """Construct the evidence provider named on the command line."""
+    kind = getattr(args, "provider", None)
+    ocr_texts = list(getattr(args, "ocr_text", []) or [])
+
+    if kind == "mock":
+        print(_MOCK_BANNER, file=sys.stderr)
+        return MockProvider(image_text="; ".join(ocr_texts), sampled_pool=ocr_texts)
+
+    if kind == "llava":
+        model_path = getattr(args, "model_path", None)
+        if not model_path:
+            raise SystemExit(
+                "--provider llava needs --model-path DIR pointing at a frozen "
+                "LLaVA-1.5-13B checkpoint (HuggingFace format).\n"
+                "  The checkpoint is ~26 GB in fp16 and is not distributed with this "
+                "repository."
+            )
+        from qacd.providers import LLaVAProvider
+
+        ocr_provider = None
+        if not getattr(args, "no_ocr", False):
+            try:
+                from qacd.providers import RapidOCRProvider
+
+                ocr_provider = RapidOCRProvider()
+            except ImportError as exc:  # pragma: no cover - depends on the install
+                raise SystemExit(
+                    "the mechanical OCR channel needs rapidocr-onnxruntime:\n"
+                    '  pip install rapidocr-onnxruntime\n'
+                    "Pass --no-ocr to run without it (accuracy will be lower)."
+                ) from exc
+        return LLaVAProvider(model_path=model_path, ocr_provider=ocr_provider)
+
+    raise SystemExit(f"unknown provider: {kind!r}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qacd", description="QACD answer-error risk scorer")
@@ -40,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_score.add_argument("--ocr-text", action="append", default=[], help="repeatable; OCR strings for the image")
     p_score.add_argument("--k", type=int, default=None, help="enable the MVR channel with this depth")
     p_score.add_argument("--json", action="store_true", help="emit raw JSON")
+    _add_provider_args(p_score)
 
     p_demo = sub.add_parser("demo", help="run the built-in offline example")
     p_demo.add_argument("--json", action="store_true")
@@ -49,11 +123,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_fit.add_argument("--out", required=True, help="destination JSON scorer")
     p_fit.add_argument("--k", type=int, default=None)
     p_fit.add_argument("--l2", type=float, default=0.05)
+    _add_provider_args(p_fit)
 
     p_serve = sub.add_parser("serve", help="run the HTTP service")
     p_serve.add_argument("--scorer", default=None)
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8080)
+    p_serve.add_argument(
+        "--provider",
+        choices=PROVIDER_CHOICES,
+        default=None,
+        help="evidence provider for live scoring; defaults to the one recorded in "
+             "the scorer file",
+    )
+    p_serve.add_argument("--model-path", default=None)
+    p_serve.add_argument("--no-ocr", action="store_true")
 
     sub.add_parser("version", help="print the version")
     return parser
@@ -71,8 +155,7 @@ def _load_records(path: str) -> List[Dict[str, Any]]:
 
 def _pipeline_from_args(args) -> QACDPipeline:
     config = QACDConfig(k=getattr(args, "k", None))
-    ocr_texts = list(getattr(args, "ocr_text", []) or [])
-    provider = MockProvider(image_text="; ".join(ocr_texts), sampled_pool=ocr_texts)
+    provider = build_provider(args)
     if getattr(args, "scorer", None):
         return QACDPipeline.load(args.scorer, provider=provider)
     return QACDPipeline(provider=provider, config=config)
@@ -125,10 +208,15 @@ def main(argv: List[str] | None = None) -> int:
 
     if args.command == "fit":
         records = _load_records(args.data)
-        pipeline = QACDPipeline(config=QACDConfig(k=args.k, l2=args.l2))
+        pipeline = QACDPipeline(
+            provider=build_provider(args), config=QACDConfig(k=args.k, l2=args.l2)
+        )
         pipeline.fit(records, verbose=True)
         path = pipeline.save(args.out)
+        for warning in pipeline.fit_warnings:
+            print(f"[qacd] !! {warning}", file=sys.stderr)
         print(f"[qacd] scorer written to {path}")
+        print(f"[qacd] fitted on provider: {pipeline.provenance.get('provider_kind')}")
         return 0
 
     if args.command == "serve":
@@ -139,7 +227,19 @@ def main(argv: List[str] | None = None) -> int:
             return 2
         from qacd.service import create_app
 
-        app = create_app(scorer_path=args.scorer)
+        pipeline = None
+        if args.scorer:
+            provider = build_provider(args) if args.provider else None
+            pipeline = QACDPipeline.load(args.scorer, provider=provider)
+            for warning in pipeline.fit_warnings:
+                print(f"[qacd] !! {warning}", file=sys.stderr)
+        elif args.provider:
+            pipeline = QACDPipeline(provider=build_provider(args))
+        elif args.provider is None and args.scorer is None:
+            args.provider = "mock"
+            pipeline = QACDPipeline(provider=build_provider(args))
+
+        app = create_app(pipeline=pipeline, scorer_path=None if pipeline else args.scorer)
         uvicorn.run(app, host=args.host, port=args.port)
         return 0
 

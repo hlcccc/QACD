@@ -103,22 +103,46 @@ The decision layer depends on **NumPy and pandas only** — no GPU, no model wei
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -r requirements.txt
 
-python -m pytest -q                  # 174 passed + 15 skipped (14 need data, 1 needs python-docx)
+python -m pytest -q                  # 188 passed + 15 skipped (14 need data, 1 needs python-docx)
 python scripts/demo_offline.py       # end-to-end demo on a synthetic dev set
 qacd demo
-
-# Fit a scorer on your own development set
-# dev.jsonl: {"question":..., "answer":..., "image":..., "failed":0|1, "group":...}
-qacd fit --data dev.jsonl --out scorer.json --k 3
-
-# Serve the four integration endpoints
-pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"
-qacd serve --scorer scorer.json --port 8080
 ```
 
-`qacd fit` and `qacd serve` default to `MockProvider` (deterministic, model-free)
-so the plumbing can be exercised anywhere. Production deployments must inject
-`LLaVAProvider` + `RapidOCRProvider`; see `qacd/providers.py`.
+That step needs no model and no GPU; it verifies the install and the plumbing.
+To get a score that **means** anything you have to attach a real evidence
+provider:
+
+```bash
+# 1. model dependencies + weights (~26 GB, not distributed here)
+pip install "torch>=2.1" "transformers>=4.40" accelerate pillow rapidocr-onnxruntime
+huggingface-cli download llava-hf/llava-1.5-13b-hf --local-dir /models/llava-1.5-13b-hf
+
+# 2. fit a scorer on your own development set
+# dev.jsonl: {"question":..., "answer":..., "image":..., "failed":0|1, "group":...}
+qacd fit --data dev.jsonl --out scorer.json --k 3 \
+         --provider llava --model-path /models/llava-1.5-13b-hf
+
+# 3. serve the four integration endpoints
+pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"
+qacd serve --scorer scorer.json --port 8080 \
+           --provider llava --model-path /models/llava-1.5-13b-hf
+```
+
+A complete copy-paste script is in
+**[`examples/run_real_provider.py`](examples/run_real_provider.py)**.
+
+> ### ⚠️ `score` and `fit` require an explicit `--provider`
+>
+> | Value | Evidence | Use |
+> |---|---|---|
+> | `llava` | a real LLaVA checkpoint + RapidOCR | **the only configuration that yields a meaningful score** |
+> | `mock` | no model, no image; readings from lexical overlap | plumbing tests only |
+>
+> The mock is **no longer the default**. Selecting it prints a banner, and the
+> scorer file it produces records `provenance.provider_kind = "mock"` so every
+> later load carries a "no model evidence; the score is meaningless" warning.
+> The reason is blunt: a silent fake default hands a first-time user a confident
+> number whose direction is exactly backwards, with nothing to indicate it.
 
 ## Integration endpoints
 
