@@ -293,6 +293,34 @@ QACD/
 └── tests/                 210 tests (195 offline + 15 needing data or an extra dep)
 ```
 
+## Data availability
+
+**What this repository contains**: the method write-up, a runnable implementation
+(decision layer / HTTP service / CLI), a line-by-line port of the frozen feature
+engineering, an offline demo, 210 tests and the contract for the four integration
+endpoints.
+
+**What it does not contain, and why**:
+
+| Not included | Why | How to get it |
+|---|---|---|
+| Frozen feature matrices, raw evidence tables, result tables | project deliverables; project management requires they not be published | ask the author for the data bundle — see [REPRODUCING.md](REPRODUCING.md) |
+| TextVQA images | third-party dataset; check its terms yourself | from the dataset's official channel |
+| LLaVA-1.5-13B weights (~26 GB) | third-party model | `huggingface-cli download llava-hf/llava-1.5-13b-hf` |
+| The research-side inference and evidence-export scripts | part of the research repository, not released here | not available; what ships is the method and its faithful port |
+
+The principle applied is the one set out in China's 《科学数据管理办法》
+(国办发〔2018〕17号): open by default, closed by exception. The method layer is
+fully open; the deliverable data layer is withheld under project management
+requirements. [REPRODUCING.md](REPRODUCING.md) spells out, level by level, what a
+reviewer can and cannot verify.
+
+> **On the evaluated model**: this repository's licence does **not** extend to any
+> third-party weights or datasets. The LLaVA-1.5-13B checkpoint derives from Meta's
+> Llama-2 family and is governed by the **Llama 2 Community License** (not
+> OSI-approved); check its terms yourself. This repository does not distribute
+> those weights.
+
 ## Citation
 
 See [CITATION.cff](CITATION.cff). The paper has not been submitted yet, so there

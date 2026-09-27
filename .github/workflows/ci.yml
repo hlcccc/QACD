@@ -11,14 +11,29 @@ permissions:
 
 jobs:
   # The documented quick start, on the platforms and interpreters it claims.
+  #
+  # Linux carries the interpreter range because that is where this will be
+  # deployed. Windows gets one leg: the OS-specific failures found so far were
+  # OS-specific rather than version-specific (a UTF-8 BOM from PowerShell's
+  # Out-File, and a GBK console), so one modern interpreter is enough to catch
+  # that class without spending four runners on it.
   test:
     name: ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ["3.9", "3.10", "3.11", "3.12"]
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v4
 
