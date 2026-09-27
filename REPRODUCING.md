@@ -23,12 +23,12 @@
 git clone https://github.com/hlcccc/QACD.git && cd QACD
 pip install -e ".[test]"
 
-python -m pytest -q          # 预期：195 passed, 15 skipped
+python -m pytest -q          # 预期：215 passed, 15 skipped
 python scripts/demo_offline.py
 qacd demo
 ```
 
-**预期看到的**：`pytest` 195 项通过、15 项跳过。跳过项会在 `pytest -rs` 下打印原因：
+**预期看到的**：`pytest` 215 项通过、15 项跳过。跳过项会在 `pytest -rs` 下打印原因：
 
 - 14 项需要实验数据（`raw evidence tables not present`）；
 - 1 项需要 `python-docx`（只用于生成交付 Word，不属于运行时依赖，`[test]` 里没有它）。

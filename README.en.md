@@ -85,7 +85,7 @@ Without the data those scripts exit with status **2** and name the missing input
 they never pass silently on empty input. 15 tests report as `skipped` in the
 documented quick-start environment (`pytest -rs` prints why): 14 need the data and
 1 checks the integration-table generator, which needs `python-docx`. The other
-**195** need nothing.
+**215** need nothing.
 
 ## Pipeline
 
@@ -116,7 +116,7 @@ pip install -e ".[test]"
 > for embedding QACD in your own code; use `python -m qacd.cli` in place of `qacd`.
 
 ```bash
-python -m pytest -q                  # 195 passed + 15 skipped (14 need data, 1 needs python-docx)
+python -m pytest -q                  # 215 passed + 15 skipped (14 need data, 1 needs python-docx)
 python scripts/demo_offline.py       # end-to-end demo on a synthetic dev set
 qacd demo
 ```
@@ -171,6 +171,73 @@ A complete copy-paste script is in
 > The reason is blunt: a silent fake default hands a first-time user a confident
 > number whose direction is exactly backwards, with nothing to indicate it.
 
+## Preparing the model and the data
+
+### The model
+
+```bash
+pip install -e ".[llava,ocr]"
+huggingface-cli download llava-hf/llava-1.5-13b-hf --local-dir /models/llava-1.5-13b-hf
+```
+
+About 26 GB in fp16; 40 GB of card recommended. You do **not** have to finish the
+download before checking your wiring — `python examples/smoke_test_stub_model.py`
+drives the real provider code path with a stub model.
+
+Another LVLM works too, but the frozen coefficients do **not** transfer: refit and
+re-evaluate on your own holdout (docs/04 section 9).
+
+### The data
+
+QACD's calibrator is fitted on **your** labelled development set, so this step is
+the integrator's to do. The set is JSONL, one response per line:
+
+```json
+{"question": "What brand is the camera?", "answer": "Dakota Digital",
+ "image": "/data/textvqa/val/eb38600d8a5ade9a.jpg", "failed": 0,
+ "group": "/data/textvqa/val/eb38600d8a5ade9a.jpg"}
+```
+
+| Field | Meaning |
+|---|---|
+| `question` / `answer` | the question, and the answer **the model under evaluation gave** |
+| `image` | image path, read by the evidence channels |
+| `failed` | `1` when that answer is wrong. **You define the rule** — see below |
+| `group` | **must be the image.** The calibration split is taken by image; several questions about one photograph must not straddle it, or the calibration set contains near-duplicates of the training set and the reported confidence comes out optimistic |
+
+**Where the images come from**: your own VQA data is fine — it does not have to be
+TextVQA. If you do want TextVQA, get it from the dataset's official channel; this
+repository does not distribute it.
+
+**Where the answers and labels come from**: run your model to get `answer`, then
+compare against the accepted answers to get `failed`. There is a tool for that step:
+
+```bash
+python examples/make_dev_set.py --data raw.jsonl --out dev.jsonl
+```
+
+Each line of `raw.jsonl` carries the development-set fields plus the evidence for
+the label, in one of two shapes:
+
+```json
+{"question": "...", "answer": "...", "image": "...", "gold": "Dakota Digital"}
+{"question": "...", "answer": "...", "image": "...", "answers": ["Dakota Digital", "Dakota Digital", "..."]}
+```
+
+- `gold`, a single accepted answer → exact match after normalisation (case,
+  punctuation and stray whitespace do not matter);
+- `answers`, the ten annotator answers (the VQA convention) → the standard
+  `min(matches / 3, 1)` score, with `--accuracy-threshold` setting the binary label.
+
+**The label definition is a platform decision, not a property of QACD.** If your
+product cares more about brand-name errors than counting errors, replace
+`decide_label` in `examples/make_dev_set.py` with your own rule — what matters is
+that it is written down. A calibrator is only as good as the labels it is fitted on.
+
+**How much**: 300 responses is a floor, not a comfortable size; most of the gain is
+in by about 1,200. The learning curve is in docs/03 section 4. The script warns when
+the count or the label balance looks wrong.
+
 ## Integration endpoints
 
 | Endpoint | Component | Status |
@@ -190,7 +257,7 @@ which is a record-keeping placeholder rather than missing functionality.)
 
 | Component | State |
 |---|---|
-| Decision layer `qacd/` (NumPy-only) | complete, 195 offline tests |
+| Decision layer `qacd/` (NumPy-only) | complete, 215 offline tests |
 | Frozen feature layer `frozen/` (112 columns) | complete; element-wise alignment check runs once data is present |
 | Decomposition v1 (`qacd/decompose_v1.py`) | complete; frozen claim-table reproduction check likewise |
 | Decomposition v2 (`qacd/decompose.py`) | complete, repository default; **not** the version behind the reported numbers |
@@ -258,5 +325,5 @@ QACD/
 ├── configs/               reference configuration and interface schema
 ├── docs/                  method, interface, deployment, integration notes
 ├── scripts/               offline demo + verification scripts for when data lands
-└── tests/                 210 tests (195 offline + 15 needing data or an extra dep)
+└── tests/                 230 tests (215 offline + 15 needing data or an extra dep)
 ```

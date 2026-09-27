@@ -60,6 +60,20 @@ jobs:
       - name: Provider smoke test (stub model)
         run: python examples/smoke_test_stub_model.py
 
+      # The step every integrator has to take before QACD does anything useful:
+      # turn their own model's answers into a labelled development set. Run it
+      # here so the documented data-preparation path cannot rot either.
+      - name: Development-set builder on a tiny fixture
+        shell: bash
+        run: |
+          set -e
+          printf '%s\n' \
+            '{"question":"q1","answer":"Dakota Digital","image":"/i1.jpg","answers":["Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Nikon","Nikon"]}' \
+            '{"question":"q2","answer":"Nikon","image":"/i2.jpg","answers":["Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital","Dakota Digital"]}' \
+            > raw.jsonl
+          python examples/make_dev_set.py --data raw.jsonl --out dev.jsonl
+          python -c "import json; rows=[json.loads(l) for l in open('dev.jsonl',encoding='utf-8')]; assert len(rows)==2, rows; assert {r['failed'] for r in rows}=={0,1}, rows; assert all(r['group']==r['image'] for r in rows), rows; print('ok: dev.jsonl built with both labels, grouped by image')"
+
       # The README tells readers to run `qacd ...`. If packaging ever stops
       # creating that entry point, this is the only step that notices.
       - name: Console script exists and runs
