@@ -282,3 +282,72 @@ def test_mock_selection_is_loud(capsys):
     build_provider(args)
     stderr = capsys.readouterr().err
     assert "plumbing" in stderr and "no model" in stderr
+
+
+# ---------------------------------------------------------------------------
+# 5. Bad input must be reported, not traced back
+# ---------------------------------------------------------------------------
+
+def test_fit_reports_a_missing_development_set(capsys):
+    from qacd.cli import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["fit", "--data", "definitely_absent.jsonl", "--out", "s.json", "--provider", "mock"])
+    message = str(excinfo.value)
+    assert "definitely_absent.jsonl" in message
+    assert "question" in message, "the message should show the expected record shape"
+
+
+def test_fit_reports_malformed_jsonl_with_a_line_number(tmp_path):
+    from qacd.cli import main
+
+    path = tmp_path / "dev.jsonl"
+    path.write_text('{"question": "q"}\nnot json\n', encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        main(["fit", "--data", str(path), "--out", "s.json", "--provider", "mock"])
+    assert ":2" in str(excinfo.value), "the offending line number must be named"
+
+
+def test_fit_accepts_a_utf8_bom(tmp_path):
+    """PowerShell's `Out-File -Encoding utf8` writes a BOM; the loader must cope.
+
+    Without this the first line fails with a message about UTF-8 that reads like
+    file corruption rather than a byte-order mark.
+    """
+    import json
+
+    from qacd.cli import _load_records
+
+    path = tmp_path / "dev.jsonl"
+    payload = {
+        "question": "What brand?",
+        "answer": "Dakota Digital",
+        "image": "/x.jpg",
+        "failed": 0,
+        "group": "/x.jpg",
+    }
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8-sig")
+    assert path.read_bytes()[:3] == b"\xef\xbb\xbf", "fixture must really carry a BOM"
+    records = _load_records(str(path))
+    assert records[0]["question"] == "What brand?"
+
+
+def test_score_reports_a_missing_scorer_file():
+    from qacd.cli import main
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(
+            ["score", "--question", "q", "--answer", "a", "--scorer", "absent.json",
+             "--provider", "mock"]
+        )
+    assert "absent.json" in str(excinfo.value)
+
+
+def test_an_empty_development_set_is_rejected(tmp_path):
+    from qacd.cli import main
+
+    path = tmp_path / "empty.jsonl"
+    path.write_text("\n\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as excinfo:
+        main(["fit", "--data", str(path), "--out", "s.json", "--provider", "mock"])
+    assert "no records" in str(excinfo.value)

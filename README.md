@@ -107,7 +107,7 @@ python tools/export_bundle.py          # 特征矩阵与参考分数 -> artifact
 
 **缺少数据时的行为**：以上脚本以退出码 **2** 明确报出缺失项与恢复步骤，不会抛栈、
 也不会在零输入上报告成功。测试中依赖数据的 14 项显示为 `skipped`
-（`pytest -rs` 会打印原因），其余 188 项不需要任何数据。另有 1 项校验对接表生成器的测试
+（`pytest -rs` 会打印原因），其余 193 项不需要任何数据。另有 1 项校验对接表生成器的测试
 在缺少 `python-docx` 时同样跳过（该依赖只用于生成交付 Word，未列入 `requirements.txt`）。
 
 数据到位后，`QACDPipeline` 可以直接用冻结特征集打分：
@@ -138,13 +138,20 @@ claim_risk = pipeline.score_evidence_frame(test_frame)   # 每条 claim 一个�
 
 ## 快速开始
 
-决策层**只依赖 NumPy**，CPU 可跑，无需 GPU 与模型权重：
+决策层**只依赖 NumPy**，CPU 可跑，无需 GPU 与模型权重。
 
 ```bash
 git clone https://github.com/hlcccc/QACD.git && cd QACD
-pip install -r requirements.txt
 
-python -m pytest -q                  # 188 passed + 15 skipped（14 项需数据，1 项需 python-docx）
+# 安装：包本体 + 命令行入口 qacd + 测试依赖
+pip install -e ".[test]"
+```
+
+> 只装运行时依赖（`pip install -r requirements.txt`）**不会**创建 `qacd` 命令，也不会装
+> pytest —— 那种装法适合把 QACD 当库嵌进你自己的代码，此时请用 `python -m qacd.cli` 代替 `qacd`。
+
+```bash
+python -m pytest -q                  # 193 passed + 15 skipped（14 项需数据，1 项需 python-docx）
 python scripts/demo_offline.py       # 端到端离线演示（合成开发集）
 qacd demo                            # 同上的 CLI 版本
 ```
@@ -154,7 +161,7 @@ qacd demo                            # 同上的 CLI 版本
 
 ```bash
 # 1. 装模型依赖 + 取权重（约 26 GB，不在本仓库内）
-pip install "torch>=2.1" "transformers>=4.40" accelerate pillow rapidocr-onnxruntime
+pip install -e ".[llava,ocr]"
 huggingface-cli download llava-hf/llava-1.5-13b-hf --local-dir /models/llava-1.5-13b-hf
 
 # 2. 用你自己的开发集拟合打分器（dev.jsonl: question/answer/image/failed/group）
@@ -162,7 +169,7 @@ qacd fit --data dev.jsonl --out scorer.json --k 3 \
          --provider llava --model-path /models/llava-1.5-13b-hf
 
 # 3. 起 HTTP 服务（四个对接端点）
-pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"
+pip install -e ".[service]"
 qacd serve --scorer scorer.json --port 8080 \
            --provider llava --model-path /models/llava-1.5-13b-hf
 ```
@@ -197,7 +204,7 @@ qacd serve --scorer scorer.json --port 8080 \
 
 | 组件 | 状态 |
 |---|---|
-| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，188 项离线测试覆盖 |
+| 决策层（分解 / 校准 / 聚合 / MVR / 保形） | 完整，193 项离线测试覆盖 |
 | 特征层 `frozen/`（112 维冻结特征工程） | 完整；逐元素对齐检查在数据到位后可运行 |
 | 分解 v1（`qacd/decompose_v1.py`） | 完整；冻结 claim table 复现检查同上 |
 | 分解 v2（`qacd/decompose.py`） | 完整，仓库默认；**不是**产出报告数值的版本 |
@@ -276,7 +283,7 @@ QACD/
 ├── configs/               参考配置与接口 schema
 ├── docs/                  方法、接口、部署、对接说明
 ├── scripts/               离线演示 + 数据到齐后的验证脚本
-└── tests/                 203 项测试（188 离线 + 15 需数据/依赖）
+└── tests/                 208 项测试（193 离线 + 15 需数据/依赖）
 ```
 
 ## 引用

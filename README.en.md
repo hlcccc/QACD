@@ -97,13 +97,21 @@ documented quick-start environment (`pytest -rs` prints why): 14 need the data a
 
 ## Quick start
 
-The decision layer depends on **NumPy and pandas only** — no GPU, no model weights:
+The decision layer depends on **NumPy and pandas only** — no GPU, no model weights.
 
 ```bash
 git clone https://github.com/hlcccc/QACD.git && cd QACD
-pip install -r requirements.txt
 
-python -m pytest -q                  # 188 passed + 15 skipped (14 need data, 1 needs python-docx)
+# package + the `qacd` console script + test dependencies
+pip install -e ".[test]"
+```
+
+> Installing only the runtime dependencies (`pip install -r requirements.txt`) does
+> **not** create the `qacd` command and does **not** install pytest. That route is
+> for embedding QACD in your own code; use `python -m qacd.cli` in place of `qacd`.
+
+```bash
+python -m pytest -q                  # 193 passed + 15 skipped (14 need data, 1 needs python-docx)
 python scripts/demo_offline.py       # end-to-end demo on a synthetic dev set
 qacd demo
 ```
@@ -114,7 +122,7 @@ provider:
 
 ```bash
 # 1. model dependencies + weights (~26 GB, not distributed here)
-pip install "torch>=2.1" "transformers>=4.40" accelerate pillow rapidocr-onnxruntime
+pip install -e ".[llava,ocr]"
 huggingface-cli download llava-hf/llava-1.5-13b-hf --local-dir /models/llava-1.5-13b-hf
 
 # 2. fit a scorer on your own development set
@@ -123,7 +131,7 @@ qacd fit --data dev.jsonl --out scorer.json --k 3 \
          --provider llava --model-path /models/llava-1.5-13b-hf
 
 # 3. serve the four integration endpoints
-pip install "fastapi>=0.110" "uvicorn>=0.27" "pydantic>=2.0"
+pip install -e ".[service]"
 qacd serve --scorer scorer.json --port 8080 \
            --provider llava --model-path /models/llava-1.5-13b-hf
 ```

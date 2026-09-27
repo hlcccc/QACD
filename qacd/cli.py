@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any, Dict, List
 
 from qacd import __version__
@@ -143,13 +144,45 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _require_file(path: str, what: str, hint: str = "") -> Path:
+    """Resolve a path the user named, or exit with something readable.
+
+    Without this a typo produced a raw ``FileNotFoundError`` traceback, which
+    tells a first-time user nothing about which argument was wrong.
+    """
+    resolved = Path(path).expanduser()
+    if not resolved.is_file():
+        message = f"{what} not found: {path}"
+        if hint:
+            message += f"\n  {hint}"
+        raise SystemExit(message)
+    return resolved
+
+
 def _load_records(path: str) -> List[Dict[str, Any]]:
+    source = _require_file(
+        path,
+        "development set",
+        'Expected JSONL, one object per line:\n'
+        '  {"question": "...", "answer": "...", "image": "...", '
+        '"failed": 0|1, "group": "..."}',
+    )
     records: List[Dict[str, Any]] = []
-    with open(path, encoding="utf-8") as handle:
-        for line in handle:
+    # utf-8-sig, not utf-8: on Windows both PowerShell's `Out-File -Encoding utf8`
+    # and Excel's CSV export prepend a BOM, and the resulting JSONL is otherwise
+    # rejected on its first line with a message about UTF-8 that reads like a
+    # file-corruption problem rather than a byte-order mark.
+    with source.open(encoding="utf-8-sig") as handle:
+        for lineno, line in enumerate(handle, 1):
             line = line.strip()
-            if line:
+            if not line:
+                continue
+            try:
                 records.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"{path}:{lineno} is not valid JSON: {exc.msg}") from exc
+    if not records:
+        raise SystemExit(f"{path} holds no records")
     return records
 
 
@@ -157,7 +190,12 @@ def _pipeline_from_args(args) -> QACDPipeline:
     config = QACDConfig(k=getattr(args, "k", None))
     provider = build_provider(args)
     if getattr(args, "scorer", None):
-        return QACDPipeline.load(args.scorer, provider=provider)
+        scorer = _require_file(
+            args.scorer,
+            "scorer file",
+            "`--scorer` takes the JSON written by `qacd fit --out`.",
+        )
+        return QACDPipeline.load(scorer, provider=provider)
     return QACDPipeline(provider=provider, config=config)
 
 
@@ -229,8 +267,13 @@ def main(argv: List[str] | None = None) -> int:
 
         pipeline = None
         if args.scorer:
+            scorer = _require_file(
+                args.scorer,
+                "scorer file",
+                "`--scorer` takes the JSON written by `qacd fit --out`.",
+            )
             provider = build_provider(args) if args.provider else None
-            pipeline = QACDPipeline.load(args.scorer, provider=provider)
+            pipeline = QACDPipeline.load(scorer, provider=provider)
             for warning in pipeline.fit_warnings:
                 print(f"[qacd] !! {warning}", file=sys.stderr)
         elif args.provider:
