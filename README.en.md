@@ -164,8 +164,10 @@ A complete copy-paste script is in
 
 ## Code completeness
 
-Every production path is implemented; there are no `NotImplementedError` stubs,
-no `TODO` markers and no bare `except` clauses in the package.
+Every production path is implemented. Inside the `qacd/` package there are no
+`NotImplementedError` stubs, no `TODO` markers and no bare `except` clauses.
+(The one outstanding `TODO` in the repository is `CITATION.cff`'s author block,
+which is a record-keeping placeholder rather than missing functionality.)
 
 | Component | State |
 |---|---|
@@ -216,10 +218,11 @@ All documentation is currently in Chinese; see [docs/](docs/).
 
 | Document | Contents |
 |---|---|
+| **[REPRODUCING](REPRODUCING.md)** | **for reviewers: what can be verified, what cannot, and how** |
 | [01-方法说明](docs/01-方法说明.md) | method, pipeline, results |
 | [02-接口文档](docs/02-接口文档.md) | request/response contract for the four endpoints |
 | [03-部署与资源需求](docs/03-部署与资源需求.md) | dependencies, VRAM, call counts, development-set size, deployment steps |
-| [04-平台对接说明](docs/04-平台对接说明.md) | integration boundary, acceptance criteria, monitoring, FAQ |
+| [04-平台对接说明](docs/04-平台对接说明.md) | integration boundary, acceptance criteria, deployment security, monitoring, FAQ |
 | [05-课题一技术对接表](docs/05-课题一技术对接表.md) | the technology point as submitted to the project office |
 
 ## Feature engineering
