@@ -111,7 +111,7 @@ ROWS = [
         '"threshold": "float(optional)"}',
         '{"risk_score": "float(0-1)", "is_high_risk": "bool", "num_claims": "int", '
         '"claims": "list[object]", "version": "string"}',
-        "使用 GitHub 链接中提供的 qacd 包与 run.py，本地运行环境依赖见 GitHub requirements.txt",
+        "使用 GitHub 链接中提供的 qacd 包与 run.py，安装与运行方式见 GitHub README「快速开始」",
         "单卡 40G 显存",
         STAGE,
         PAPER,
@@ -126,7 +126,7 @@ ROWS = [
         '{"sampled_answers": "list[string]", "ocr_texts": "list[string]", "k": "int(optional)"}',
         '{"k_used": "int", "features": "object(7 维稳定性特征)"}',
         "使用 GitHub 链接中提供的 qacd.mvr_features 接口，K 建议取 3，"
-        "本地运行环境依赖见 GitHub requirements.txt",
+        "安装与运行方式见 GitHub README「快速开始」",
         "复用主模型，无额外显存",
         STAGE,
         PAPER,
@@ -142,7 +142,7 @@ ROWS = [
         '"ocr_scores": "list[float](optional)"}',
         '{"features": "object(19 项机械特征)", "note": "string"}',
         "使用 GitHub 链接中提供的 qacd.mechanical_ocr_features 接口 + RapidOCR，"
-        "本地运行环境依赖见 GitHub requirements.txt",
+        "安装与运行方式见 GitHub README「快速开始」",
         "CPU 运行，无显存需求",
         STAGE,
         PAPER,
@@ -158,7 +158,7 @@ ROWS = [
         '"alpha": "float(optional)", "procedure": "string(optional)"}',
         '{"accepted": "list[bool]", "coverage": "float", "realized_fdp": "float|null"}',
         "使用 GitHub 链接中提供的 qacd.conformal_select 接口，"
-        "本地运行环境依赖见 GitHub requirements.txt",
+        "安装与运行方式见 GitHub README「快速开始」",
         "CPU 运行，无显存需求",
         STAGE,
         PAPER,
@@ -191,7 +191,7 @@ TOPIC2_ROWS = [
         '{"question": "string", "answer": "string", "image": "string(optional)", '
         '"threshold": "float(optional)"}',
         response_signature(),
-        "使用 GitHub 链接中提供的 qacd 包与 run.py，本地运行环境依赖见 GitHub requirements.txt",
+        "使用 GitHub 链接中提供的 qacd 包与 run.py，安装与运行方式见 GitHub README「快速开始」",
         "单卡 40G 显存",
         STAGE,
         PAPER,
