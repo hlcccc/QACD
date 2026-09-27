@@ -2,6 +2,9 @@
 
 **Post-hoc answer-error risk scoring for LVLM visual question answering**
 
+[![CI](https://github.com/hlcccc/QACD/actions/workflows/ci.yml/badge.svg)](https://github.com/hlcccc/QACD/actions/workflows/ci.yml)
+[![python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
+
 QACD is a *post-processing* risk scorer. It does not retrain or modify the model
 under evaluation: given a frozen LVLM's answer together with the question and the
 image, it returns an answer-level error-risk score in `[0, 1]`, a matching
@@ -171,7 +174,7 @@ which is a record-keeping placeholder rather than missing functionality.)
 
 | Component | State |
 |---|---|
-| Decision layer `qacd/` (NumPy-only) | complete, 174 offline tests |
+| Decision layer `qacd/` (NumPy-only) | complete, 193 offline tests |
 | Frozen feature layer `frozen/` (112 columns) | complete; element-wise alignment check runs once data is present |
 | Decomposition v1 (`qacd/decompose_v1.py`) | complete; frozen claim-table reproduction check likewise |
 | Decomposition v2 (`qacd/decompose.py`) | complete, repository default; **not** the version behind the reported numbers |
@@ -273,7 +276,7 @@ QACD/
 ├── configs/               reference configuration and interface schema
 ├── docs/                  method, interface, deployment, integration notes
 ├── scripts/               offline demo + verification scripts for when data lands
-└── tests/                 189 tests (174 offline + 15 needing data or an extra dep)
+└── tests/                 208 tests (193 offline + 15 needing data or an extra dep)
 ```
 
 ## Citation

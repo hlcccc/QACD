@@ -5,6 +5,12 @@ Uses FastAPI's TestClient, so every route, request model and response model in
 installed.
 """
 
+# Must precede every annotation in this module: without it the ``int | None``
+# below is evaluated at import time and raises on Python 3.9, which pyproject
+# still declares as supported. That failure happens at collection, so it would
+# take the whole module down rather than one test.
+from __future__ import annotations
+
 import pytest
 
 fastapi = pytest.importorskip("fastapi", reason="service extra not installed")

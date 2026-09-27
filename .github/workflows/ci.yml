@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The documented quick start, on the platforms and interpreters it claims.
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install (the command the README gives)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Test suite
+        run: python -m pytest -q -rs
+
+      - name: Offline demo
+        run: python scripts/demo_offline.py
+
+      # The README tells readers to run `qacd ...`. If packaging ever stops
+      # creating that entry point, this is the only step that notices.
+      - name: Console script exists and runs
+        run: |
+          qacd version
+          qacd demo
+
+  # The other documented install path: runtime dependencies only, no package
+  # install, no pytest. The decision layer must still import and the CLI must
+  # still be reachable as a module.
+  runtime-only:
+    name: runtime deps only (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install requirements.txt only
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The README says this route does not give you the `qacd` console script
+      # and requires `python -m qacd.cli`. Both halves of that claim are checked.
+      - name: Module entry point works
+        run: python -m qacd.cli version
+
+      - name: Console script is absent, as documented
+        run: |
+          python - <<'PY'
+          import shutil, sys
+          if shutil.which("qacd"):
+              sys.exit("requirements.txt unexpectedly installed the qacd console script")
+          print("ok: no console script, matching the README")
+          PY
+
+      - name: Decision layer imports
+        run: |
+          python -c "import qacd, qacd.pipeline, qacd.providers, qacd.decompose"
+
+  # The repository ships without its experimental data. The scripts that need it
+  # must say so and exit 2 -- never pass silently on empty input.
+  data-absent:
+    name: missing data is reported, not ignored
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -e ".[test]"
+
+      - name: Verification scripts exit 2
+        run: |
+          set +e
+          for script in verify_feature_port verify_decomposition_v1 verify_pipeline_frozen; do
+            python "scripts/$script.py" > /tmp/out.txt 2>&1
+            code=$?
+            if [ "$code" -ne 2 ]; then
+              echo "::error::$script exited $code, expected 2"
+              cat /tmp/out.txt
+              exit 1
+            fi
+            echo "ok: $script exited 2"
+            cat /tmp/out.txt
+          done
+
+  # Documentation is part of the deliverable; a broken relative link is a defect.
+  docs:
+    name: documentation links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Every relative markdown link resolves
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+
+          root = pathlib.Path(".")
+          broken = []
+          files = [p for p in root.rglob("*.md") if ".git" not in p.parts]
+          for path in files:
+              text = path.read_text(encoding="utf-8")
+              for match in re.finditer(r"\]\(([^)]+)\)", text):
+                  target = match.group(1).split("#")[0]
+                  if not target or target.startswith(("http", "mailto")):
+                      continue
+                  resolved = (path.parent / target).resolve()
+                  if not resolved.exists():
+                      broken.append(f"{path}: {target}")
+          for item in broken:
+              print(f"broken link: {item}")
+          sys.exit(1 if broken else 0)
+          PY

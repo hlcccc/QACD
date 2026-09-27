@@ -2,7 +2,7 @@
 
 **面向 LVLM 视觉问答的回答级错误风险后处理评分**
 
-[![tests](https://img.shields.io/badge/tests-176%20passed-brightgreen)](#快速开始)
+[![CI](https://github.com/hlcccc/QACD/actions/workflows/ci.yml/badge.svg)](https://github.com/hlcccc/QACD/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-proprietary-lightgrey)](NOTICE.md)
 
