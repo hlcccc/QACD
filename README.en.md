@@ -320,12 +320,3 @@ reviewer can and cannot verify.
 > Llama-2 family and is governed by the **Llama 2 Community License** (not
 > OSI-approved); check its terms yourself. This repository does not distribute
 > those weights.
-
-## Citation
-
-See [CITATION.cff](CITATION.cff). The paper has not been submitted yet, so there
-is no public link.
-
-## Licence
-
-Proprietary. See [NOTICE.md](NOTICE.md).

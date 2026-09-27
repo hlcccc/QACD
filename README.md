@@ -4,7 +4,6 @@
 
 [![CI](https://github.com/hlcccc/QACD/actions/workflows/ci.yml/badge.svg)](https://github.com/hlcccc/QACD/actions/workflows/ci.yml)
 [![python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
-[![license](https://img.shields.io/badge/license-proprietary-lightgrey)](NOTICE.md)
 
 ---
 
@@ -323,12 +322,3 @@ QACD/
 > **关于被评估模型**：本仓库的许可**不延伸**到任何第三方权重或数据集。LLaVA-1.5-13B
 > 权重来自 Meta 的 Llama-2 系模型，适用 **Llama 2 Community License**（非 OSI 认可），
 > 其条款由使用方自行确认。本仓库不分发这些权重。
-
-## 引用
-
-见 [CITATION.cff](CITATION.cff)。论文尚未投稿，暂无公开链接。
-
-## 许可
-
-专有许可，见 [NOTICE.md](NOTICE.md)。本项目为课题一交付件，
-未经授权不得对外分发。
