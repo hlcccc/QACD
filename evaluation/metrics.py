@@ -15,6 +15,8 @@ __all__ = [
     "auroc",
     "weighted_auroc",
     "brier",
+    "ece",
+    "reliability_curve",
     "image_level",
     "paired_image_bootstrap",
 ]
@@ -82,6 +84,96 @@ def brier(labels: Sequence[int], probabilities: Sequence[float]) -> float:
     if len(y) != len(p):
         raise ValueError("labels and probabilities must have the same length")
     return float(np.mean((p - y) ** 2))
+
+
+def reliability_curve(
+    labels: Sequence[int],
+    probabilities: Sequence[float],
+    n_bins: int = 15,
+    strategy: str = "uniform",
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-bin ``(mean_confidence, empirical_accuracy, count)``.
+
+    Empty bins are dropped rather than reported as zero, so the returned arrays
+    can be plotted directly without inventing points.
+
+    Parameters
+    ----------
+    n_bins:
+        Number of bins. 15 equal-width bins is the convention used in the
+        calibration literature (Guo et al., 2017); equal-mass bins are available
+        because a score distribution concentrated in a narrow range -- which is
+        what a saturated risk map looks like -- leaves most equal-width bins
+        empty and makes the estimate noisy.
+    strategy:
+        ``"uniform"`` for equal-width bins over ``[0, 1]``, ``"quantile"`` for
+        equal-count bins.
+    """
+    y = np.asarray(labels, dtype=np.float64).reshape(-1)
+    p = np.asarray(probabilities, dtype=np.float64).reshape(-1)
+    if len(y) != len(p):
+        raise ValueError("labels and probabilities must have the same length")
+    if len(y) == 0:
+        raise ValueError("no observations")
+    if n_bins < 1:
+        raise ValueError("n_bins must be >= 1")
+    if strategy not in ("uniform", "quantile"):
+        raise ValueError("strategy must be 'uniform' or 'quantile'")
+    if float(p.min()) < 0.0 or float(p.max()) > 1.0:
+        raise ValueError(
+            "probabilities must lie in [0, 1]; ECE is undefined for raw scores. "
+            "Map them through a calibrator first."
+        )
+
+    if strategy == "uniform":
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+        # np.digitize puts p == 1.0 out of range; clamp it into the last bin.
+        index = np.clip(np.digitize(p, edges[1:-1], right=False), 0, n_bins - 1)
+    else:
+        quantiles = np.linspace(0.0, 1.0, n_bins + 1)
+        edges = np.quantile(p, quantiles)
+        index = np.clip(np.digitize(p, edges[1:-1], right=False), 0, n_bins - 1)
+
+    confidences, accuracies, counts = [], [], []
+    for b in range(n_bins):
+        mask = index == b
+        n = int(mask.sum())
+        if n == 0:
+            continue
+        confidences.append(float(p[mask].mean()))
+        accuracies.append(float(y[mask].mean()))
+        counts.append(n)
+    return np.asarray(confidences), np.asarray(accuracies), np.asarray(counts)
+
+
+def ece(
+    labels: Sequence[int],
+    probabilities: Sequence[float],
+    n_bins: int = 15,
+    strategy: str = "uniform",
+) -> float:
+    """Expected Calibration Error: the count-weighted mean gap between the
+    predicted probability and the observed frequency.
+
+    ``ECE = sum_b (n_b / N) * |acc(b) - conf(b)|``
+
+    This is the metric the task book's "校准性能" indicator is measured with, so
+    it is the number that decides whether a calibration gain can be claimed. Two
+    properties matter when quoting it:
+
+    * it is only defined for genuine probabilities in ``[0, 1]``. A raw score
+      (UMPIRE's, for instance, which ranges over roughly ``[-7, 6]``) has to be
+      mapped through a calibrator first, or the comparison is meaningless;
+    * it is **binning-dependent**. ``n_bins`` and ``strategy`` change the value,
+      so any reported gain must state both, and the same settings must be used on
+      both sides of the comparison. Defaults here are 15 equal-width bins.
+    """
+    confidences, accuracies, counts = reliability_curve(
+        labels, probabilities, n_bins, strategy
+    )
+    if counts.sum() == 0:
+        raise ValueError("no observations")
+    return float(np.sum(counts / counts.sum() * np.abs(accuracies - confidences)))
 
 
 def image_level(

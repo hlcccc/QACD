@@ -9,10 +9,86 @@ from evaluation.bundle import load_bundle, sha256_file
 from evaluation.metrics import (
     auroc,
     brier,
+    ece,
     image_level,
     paired_image_bootstrap,
+    reliability_curve,
     weighted_auroc,
 )
+
+
+# -- ECE ------------------------------------------------------------------
+#
+# ECE is the metric the task book's 指标 2.2 is measured with, so its properties
+# decide whether a calibration gain can be claimed. The last test in this block
+# pins the property that matters most when quoting one.
+
+def test_ece_is_zero_for_a_perfectly_calibrated_constant():
+    y = [0] * 50 + [1] * 50
+    assert ece(y, [0.5] * 100) == pytest.approx(0.0)
+
+
+def test_ece_reports_the_gap_when_confidence_is_inverted():
+    y = [0] * 50 + [1] * 50
+    p = [0.9] * 50 + [0.1] * 50
+    assert ece(y, p) == pytest.approx(0.9)
+
+
+def test_ece_grows_with_overconfidence():
+    rng = np.random.default_rng(0)
+    p = rng.uniform(0, 1, 20_000)
+    y = (rng.uniform(0, 1, len(p)) < p).astype(int)
+    honest = ece(y, p)
+    overconfident = ece(y, p ** 1.6)
+    assert overconfident > honest
+
+
+def test_ece_rejects_scores_that_are_not_probabilities():
+    """A raw score has no ECE; mapping it through a calibrator is the caller's job."""
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        ece([0, 1, 0], [-1.0, 0.5, 2.0])
+
+
+def test_reliability_curve_drops_empty_bins():
+    conf, acc, count = reliability_curve([0, 1, 0, 1], [0.1, 0.9, 0.1, 0.9], n_bins=10)
+    assert len(conf) == len(acc) == len(count) == 2, "only two bins are occupied"
+    assert count.sum() == 4
+
+
+def test_ece_is_binning_dependent_so_the_setting_must_be_quoted():
+    """The same predictions give different ECE at different bin counts.
+
+    This is why any reported gain has to name its binning, and why both sides of a
+    comparison must use the same one.
+    """
+    rng = np.random.default_rng(1)
+    p = rng.uniform(0, 1, 5_000)
+    y = (rng.uniform(0, 1, len(p)) < p ** 0.6).astype(int)
+    values = {n: ece(y, p, n_bins=n) for n in (5, 10, 20, 50)}
+    assert len(set(round(v, 9) for v in values.values())) > 1, values
+
+
+def test_ece_can_be_gamed_by_a_constant_predictor():
+    """The trap worth knowing before quoting an ECE gain.
+
+    A predictor that always outputs the base rate has a *perfect* ECE and no
+    discriminative power whatsoever. ECE measures agreement between the stated
+    probability and the observed frequency; it says nothing about whether the
+    predictions separate the classes. Quoting an ECE gain without a proper score
+    or a ranking metric alongside it invites exactly this comparison.
+    """
+    rng = np.random.default_rng(7)
+    y = (rng.uniform(0, 1, 2_000) < 0.4).astype(int)
+
+    constant = np.full(len(y), float(y.mean()))
+    assert ece(y, constant) == pytest.approx(0.0, abs=1e-12)
+    assert auroc(y, constant) == pytest.approx(0.5), "no discrimination at all"
+
+    informative = np.clip(0.4 + 0.3 * (2 * y - 1) + rng.normal(0, 0.15, len(y)), 0, 1)
+    assert auroc(y, informative) > 0.9
+    assert ece(y, informative) > ece(y, constant), (
+        "the informative predictor has the worse ECE -- which is the point"
+    )
 
 
 # -- metrics -------------------------------------------------------------

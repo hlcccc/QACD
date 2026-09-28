@@ -104,6 +104,17 @@ artifacts/
 | `scripts/verify_feature_port.py` | 112 维特征与冻结矩阵逐元素对齐 |
 | `scripts/verify_decomposition_v1.py` | v1 分解复现冻结 claim table |
 | `scripts/verify_pipeline_frozen.py` | `QACDPipeline` 端到端闭环 |
+| `scripts/measure_calibration_gain.py` | 校准性能（ECE）的校准前后对比 |
+
+`measure_calibration_gain.py` 算的是**指标 2.2** 需要的那个数：ECE 的相对改进。它同时
+给出 Brier 与分箱敏感性，**引用时必须连同 `n_bins` 与 `strategy` 一起写**——ECE 是
+分箱相关的，换设置数值就变。
+
+> **关于 ECE 的一个陷阱。** ECE 只衡量"说出的概率与实际发生的频率是否一致"，不衡量
+> "有没有把两类区分开"。一个永远输出基准失败率的**常数预测器**，ECE 恰好是 0，
+> 判别能力也是 0（AUROC 0.5）。所以报指标 2.2 时**务必同时给出 Brier 或 AUROC**，
+> 否则第三方用一个常数预测器就能在任何真实方法面前"赢"下 ECE。
+> `measure_calibration_gain.py` 因此把三个指标一并打印。
 
 **缺少数据时的行为**：以上脚本以退出码 **2** 明确报出缺失项与恢复步骤，不会抛栈、
 也不会在零输入上报告成功。测试中依赖数据的 14 项显示为 `skipped`
