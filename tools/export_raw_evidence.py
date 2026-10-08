@@ -111,7 +111,7 @@ def main(argv=None) -> int:
     manifest = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "purpose": "inputs of the feature stage, for offline verification of the ported code",
-        "protocol_script": {"path": str(PROTOCOL), "sha256": sha256_file(PROTOCOL)},
+        "protocol_script": {"file": Path(PROTOCOL).name, "sha256": sha256_file(PROTOCOL)},
         "exports": {},
         "sources": {},
     }
@@ -122,7 +122,7 @@ def main(argv=None) -> int:
             dst = OUT_DIR / f"{split}_{key}.csv.gz"
             rows, dropped = drop_targets(src, dst)
             manifest["sources"][f"{split}_{key}"] = {
-                "path": str(src),
+                "file": src.name,
                 "sha256": sha256_file(src),
                 "rows": rows,
                 "target_columns_dropped": dropped,

@@ -194,12 +194,24 @@ def main(argv=None) -> int:
         baseline_sign_flipped=np.asarray([False] * len(reference_names), dtype=bool),
     )
 
+    # The basename, not the absolute path: the hash is what makes the input
+    # verifiable, and the directory names a specific machine. See
+    # tools/strip_manifest_paths.py and NOTICE.md.
     sources = {}
     for split, config in (("dev", P.DEV), ("test", P.TEST)):
         for key, path in config.items():
-            sources[f"{split}_{key}"] = {"path": str(path), "sha256": sha256_file(Path(path))}
-    sources["sampling"] = {"path": str(P.SAMPLES), "sha256": sha256_file(Path(P.SAMPLES))}
-    sources["protocol_script"] = {"path": str(PROTOCOL), "sha256": sha256_file(PROTOCOL)}
+            sources[f"{split}_{key}"] = {
+                "file": Path(path).name,
+                "sha256": sha256_file(Path(path)),
+            }
+    sources["sampling"] = {
+        "file": Path(P.SAMPLES).name,
+        "sha256": sha256_file(Path(P.SAMPLES)),
+    }
+    sources["protocol_script"] = {
+        "file": Path(PROTOCOL).name,
+        "sha256": sha256_file(PROTOCOL),
+    }
 
     manifest = {
         "created_utc": datetime.now(timezone.utc).isoformat(),
