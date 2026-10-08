@@ -18,9 +18,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from qacd.conformal import VALIDATED, conformal_select  # noqa: E402
+from qacd.console import make_console_safe  # noqa: E402
 from qacd.mechanical import mechanical_ocr_features, mvr_features  # noqa: E402
 from qacd.pipeline import QACDConfig, QACDPipeline  # noqa: E402
 from qacd.providers import MockProvider  # noqa: E402
+
+# The section labels below are Chinese. A cp1252 console -- the default on an
+# English Windows box, and on the Windows CI leg -- raises UnicodeEncodeError on
+# them rather than printing anything, which is what turned that leg red.
+make_console_safe()
 
 IMAGE_TEXT = "Dakota Digital; open 24 days; 3 bicycles"
 QUESTION = "What brand is the camera?"

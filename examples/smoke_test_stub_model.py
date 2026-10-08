@@ -48,6 +48,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from qacd.console import make_console_safe  # noqa: E402
+
+# The banners below are Chinese, and a cp1252 console raises on them instead of
+# printing. This is the step after the offline demo in CI, so it was about to be
+# the second Windows failure in a row once the first one was fixed.
+make_console_safe()
+
 QUESTION = "what is the website that host this photo?"
 ANSWER = "Flickr"
 IMAGE = "/data/textvqa/val/eb38600d8a5ade9a.jpg"

@@ -24,6 +24,7 @@ from typing import Any, Dict, List
 
 from qacd import __version__
 from qacd.conformal import VALIDATED
+from qacd.console import make_console_safe
 from qacd.mechanical import mechanical_ocr_features, mvr_features
 from qacd.pipeline import QACDConfig, QACDPipeline
 from qacd.providers import MockProvider
@@ -201,6 +202,10 @@ def _pipeline_from_args(args) -> QACDPipeline:
 
 def main(argv: List[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    # `qacd demo` prints Chinese labels, and a cp1252 console raises on them
+    # instead of printing. One call here covers every subcommand.
+    make_console_safe()
 
     if args.command == "version":
         print(f"qacd {__version__}")
